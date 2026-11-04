@@ -39,7 +39,11 @@ function stop(p) {
 
 before(async () => { await start(PORT, 'main'); });
 // workerd 가 완전히 내려가 임시 폴더를 놓을 때까지 몇 번 다시 시도한다 (Windows)
-after(async () => { await Promise.all([...running].map(stop)); rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); });
+after(async () => {
+  await Promise.all([...running].map(stop));
+  try { rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); }
+  catch (e) { console.warn(`임시 폴더를 다 못 지웠다(테스트 결과와 무관): ${e.message}`); }
+});
 
 // 메시지를 종류별로 모아 두고, 원하는 것이 올 때까지 기다린다
 function client(port = PORT, headers = {}) {
@@ -198,6 +202,7 @@ test('one connection per IP, and only allowed origins may connect', async () => 
   const b = client(port, origin);
   await b.open;
   await b.next(m => m.t === 'welcome');
+  await a.next(m => m.t === 'replaced', 1000); // 닫힘 신호보다 먼저, 바로 알린다
   assert.equal(await a.closed, 4001, 'old connection closed as replaced');
   assert.equal(b.ws.readyState, WebSocket.OPEN, 'new connection stays');
   b.ws.close();

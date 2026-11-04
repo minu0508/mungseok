@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { LiveLinePoint } from '@/components/charts/live-line-chart'
 
-// 실시간 서버(Cloudflare Worker) 주소. 배포할 때 VITE_REALTIME_URL 로 정하고, 없으면 내 PC 의 wrangler dev 로 붙는다
-const REALTIME_URL = import.meta.env.VITE_REALTIME_URL || 'ws://127.0.0.1:8787/ws'
+// 실시간 서버(Cloudflare Worker) 주소. 배포할 때 VITE_REALTIME_URL 로 정한다.
+// 없으면 화면과 같은 주소의 /ws 로 붙는다 (내 PC 에서는 vite preview 가 wrangler dev 로 넘겨준다)
+const REALTIME_URL = import.meta.env.VITE_REALTIME_URL || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`
 
 export type Peer = { id: string; name: string; seat: number }
 export type Rank = { name: string; secs: number }
@@ -93,6 +94,12 @@ export function useMungseok() {
           break
         case 'count':
           setCounts(prev => [...prev.slice(-(COUNT_KEEP - 1)), { time: m.time, value: m.value }])
+          break
+        case 'replaced': // 같은 네트워크에서 새로 접속했다
+          sock.onclose = null
+          sock.close()
+          clearInterval(timer.current)
+          setPhase('replaced')
           break
         case 'check':
           setPaused(true)

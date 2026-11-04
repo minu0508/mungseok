@@ -179,6 +179,8 @@ export class World extends DurableObject<Env> {
       for (const old of this.ctx.getWebSockets(`ip:${who}`)) {
         const c = { ws: old, p: old.deserializeAttachment() as Peer }
         if (c.p?.since) { this.standUp(c); this.updateCount() }
+        // 닫힘 신호는 늦게 닿을 수 있어(로컬에서 약 10초) 먼저 알리고 닫는다. 화면은 이 메시지를 받자마자 스스로 끊는다
+        this.send(old, { t: 'replaced' })
         try { old.close(4001, 'replaced') } catch { /* 이미 닫힘 */ }
       }
     }

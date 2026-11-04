@@ -59,7 +59,7 @@ function build(W: number, H: number, dpr: number): World {
     x += w + rnd() * 3
   }
   // 남산
-  const nx = W * (narrow ? 0.74 : 0.7), peak = deckY - H * 0.085, th = H * 0.1, tw = Math.max(2, 3 * k)
+  const nx = W * (narrow ? 0.74 : 0.7), peak = deckY - H * 0.085, th = H * 0.1
   // 가까운 스카이라인: 가운데에 고층 빌딩, 양옆은 아파트 단지. 왼쪽 하늘은 글자 자리로 낮게 비운다
   const near: Bld[] = []
   const blinks: Blink[] = [{ x: nx, y: peak - th - H * 0.03, phase: 0 }]
@@ -108,11 +108,29 @@ function build(W: number, H: number, dpr: number): World {
     ctx.moveTo(nx - W * 0.16, deckY)
     ctx.bezierCurveTo(nx - W * 0.07, peak - H * 0.01, nx + W * 0.05, peak - H * 0.012, nx + W * 0.15, deckY)
     ctx.fill()
-    ctx.fillStyle = night ? '#121a2d' : '#d9dde3'
-    ctx.fillRect(nx - tw / 2, peak - th, tw, th)
-    ctx.fillRect(nx - 6 * k, peak - th * 0.78, 12 * k, 5 * k)
-    ctx.fillRect(nx - 0.5, peak - th - H * 0.03, 1, H * 0.03)
-    if (night) for (let i = 0; i < 6; i++) light(nx - 5 * k + i * 2 * k, peak - th * 0.78 + 2 * k, 1, 1, '#fff1d6', 0.9)
+    // N서울타워: 위로 가늘어지는 기둥, 여러 층의 원통형 전망대, 가는 윗기둥과 긴 안테나
+    const at = (f: number) => peak - th * f       // 산꼭대기에서 높이 비율 f 인 y
+    const tk = Math.max(1, k)                     // 탑은 너무 가늘어지지 않게
+    const shade = ctx.createLinearGradient(nx - 8 * tk, 0, nx + 8 * tk, 0) // 원통처럼 왼쪽은 밝고 오른쪽은 어둡다
+    shade.addColorStop(0, night ? '#1d2639' : '#eef1f4')
+    shade.addColorStop(1, night ? '#0c1220' : '#a9b2be')
+    ctx.fillStyle = shade
+    const poly = (pts: [number, number][]) => { ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.fill() }
+    poly([[nx - 3 * tk, peak + 2], [nx - 1.5 * tk, at(0.62)], [nx + 1.5 * tk, at(0.62)], [nx + 3 * tk, peak + 2]])      // 기둥
+    poly([[nx - 1.6 * tk, at(0.62)], [nx - 6 * tk, at(0.665)], [nx + 6 * tk, at(0.665)], [nx + 1.6 * tk, at(0.62)]])   // 전망대 아래 받침
+    ctx.beginPath(); ctx.roundRect(nx - 6.5 * tk, at(0.745), 13 * tk, at(0.665) - at(0.745), 2 * tk); ctx.fill()       // 전망대
+    ctx.fillRect(nx - 4.5 * tk, at(0.79), 9 * tk, at(0.745) - at(0.79))                                                // 전망대 윗층
+    poly([[nx - 1.6 * tk, at(0.79)], [nx - 1 * tk, at(1)], [nx + 1 * tk, at(1)], [nx + 1.6 * tk, at(0.79)]])           // 윗기둥
+    ctx.fillRect(nx - 0.5, at(1) - H * 0.03, 1, H * 0.03)                                                               // 안테나
+    ctx.fillRect(nx - 1.5 * tk, at(1) - H * 0.012, 3 * tk, 0.8)
+    if (night) {
+      const g = ctx.createRadialGradient(nx, at(0.4), 0, nx, at(0.4), th * 0.5) // 기둥을 비추는 조명
+      g.addColorStop(0, 'rgba(255,214,170,.16)')
+      g.addColorStop(1, 'rgba(255,214,170,0)')
+      ctx.fillStyle = g
+      ctx.fillRect(nx - th * 0.5, at(0.9), th, th * 0.9)
+      for (let i = -5; i <= 5; i++) light(nx + i * 1.1 * tk - 0.35, at(0.715), 0.7, 1.4, '#fff1d6', 0.9, 0.6) // 전망대 창
+    }
     // 가까운 빌딩
     const DAY = ['#5a6880', '#66748a', '#4f5d74', '#728098', '#5f6b7d', '#6b6f78']
     for (const b of near) {
@@ -171,11 +189,13 @@ function build(W: number, H: number, dpr: number): World {
   const clouds = (fill: (a: number) => string) => {
     const { c, ctx } = layer(CLOUD_W, y0 * 0.75, dpr)
     const r2 = seeded(77)
+    const ch = y0 * 0.75
     for (let i = 0; i < 46; i++) {
-      const cx = r2() * CLOUD_W, cy = (0.15 + r2() * 0.75) * y0 * 0.75, rx = (60 + r2() * 160) * k, ry = rx * (0.22 + r2() * 0.18)
+      const cx = r2() * CLOUD_W, cy = (0.15 + r2() * 0.75) * ch, rx = (60 + r2() * 160) * k, ry = rx * (0.22 + r2() * 0.18)
+      const alpha = 0.55 + r2() * 0.25 // 경계 양쪽 복사본이 같은 진하기여야 이음매가 안 보인다
       for (const off of [0, -CLOUD_W, CLOUD_W]) {
         const g = ctx.createRadialGradient(cx + off, cy, 0, cx + off, cy, rx)
-        g.addColorStop(0, fill(0.55 + r2() * 0.25))
+        g.addColorStop(0, fill(alpha))
         g.addColorStop(1, fill(0))
         ctx.save()
         ctx.translate(cx + off, cy)
@@ -186,6 +206,16 @@ function build(W: number, H: number, dpr: number): World {
         ctx.restore()
       }
     }
+    // 위아래 끝은 투명하게: 잘린 구름 덩어리가 띠 모양의 직선 테두리(네모칸)로 보이지 않게
+    const mask = ctx.createLinearGradient(0, 0, 0, ch)
+    mask.addColorStop(0, 'rgba(0,0,0,0)')
+    mask.addColorStop(0.22, 'rgba(0,0,0,1)')
+    mask.addColorStop(0.72, 'rgba(0,0,0,1)')
+    mask.addColorStop(1, 'rgba(0,0,0,0)')
+    ctx.globalCompositeOperation = 'destination-in'
+    ctx.fillStyle = mask
+    ctx.fillRect(0, 0, CLOUD_W, ch)
+    ctx.globalCompositeOperation = 'source-over'
     return c
   }
   const cloudsDay = clouds(a => `rgba(236,240,246,${a})`)
@@ -361,6 +391,21 @@ function compose(w: World, p: Palette) {
 // ---------------------------------------------------------------- 매 프레임
 const RAIN = { rain: 1, storm: 1.4 } as Record<string, number>
 
+/**
+ * 가로로 이어지는 무늬(구름·안개·물결)를 흘려 그린다.
+ * 화면 배율을 거치면 이음매가 소수점 픽셀에 걸려 틈(어두운 선)이나 겹침(밝은 선)이 생기므로,
+ * 실제 화면 픽셀 단위로 정수 위치에, 원래 너비 그대로 붙인다.
+ * srcY·srcH 는 무늬 그림의 픽셀, dstY·dstH 와 offset 은 CSS 픽셀.
+ */
+function tileX(ctx: CanvasRenderingContext2D, img: HTMLCanvasElement, srcY: number, srcH: number, dstY: number, dstH: number, offset: number, w: World) {
+  const tw = img.width, dpr = w.dpr
+  const off = Math.floor((offset * dpr) % tw)
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  for (let x = -off; x < w.W * dpr; x += tw) ctx.drawImage(img, 0, srcY, tw, srcH, x, Math.round(dstY * dpr), tw, Math.round(dstH * dpr))
+  ctx.restore()
+}
+
 function frame(ctx: CanvasRenderingContext2D, w: World, p: Palette, t: number, dt: number) {
   const { W, H, dpr, y0, yB, deckY } = w
   if (!w.mix) return
@@ -376,7 +421,7 @@ function frame(ctx: CanvasRenderingContext2D, w: World, p: Palette, t: number, d
     for (const [img, a] of [[w.cloudsDay, (1 - n)], [w.cloudsNight, n]] as const) {
       if (a < 0.02) continue
       ctx.globalAlpha = a * Math.min(1, p.cloud * 1.1)
-      for (let x = -off; x < W; x += CLOUD_W) ctx.drawImage(img, x, 0, CLOUD_W, ch)
+      tileX(ctx, img, 0, img.height, 0, ch, off, w)
     }
     ctx.globalAlpha = 1
   }
@@ -406,7 +451,8 @@ function frame(ctx: CanvasRenderingContext2D, w: World, p: Palette, t: number, d
     const amp = (0.4 + d * d * 8) * (1 + storm * 0.5)
     const dx = Math.sin(r * 0.12 / (0.22 + d) - t * 1.4) * amp + Math.sin(r * 0.027 + t * 0.55) * amp * 0.6
     ctx.globalAlpha = 1 - d * 0.6
-    ctx.drawImage(w.mix.refl, 0, r * dpr, W * dpr, row * dpr, dx, y0 + r, W, row)
+    // 양옆을 조금 넉넉히 그려, 줄을 옆으로 흔들어도 화면 끝에 물 바탕이 드러나지 않게 한다
+    ctx.drawImage(w.mix.refl, 0, r * dpr, W * dpr, row * dpr, dx - 16, y0 + r, W + 32, row)
   }
   // 흐름: 띠마다 다른 속도로 (가까울수록 빠르다)
   ctx.globalAlpha = 0.8 + (1 - n) * 0.6
@@ -416,8 +462,7 @@ function frame(ctx: CanvasRenderingContext2D, w: World, p: Palette, t: number, d
     const top = Math.floor((riverH * i) / bands), h = Math.ceil(riverH / bands)
     const d = (i + 0.5) / bands
     const off = (t * (5 + d * d * 46)) % CURRENT_W
-    for (let x = off - CURRENT_W; x < W; x += CURRENT_W)
-      ctx.drawImage(w.current, 0, top * dpr, CURRENT_W * dpr, h * dpr, x, y0 + top, CURRENT_W, h)
+    tileX(ctx, w.current, Math.round(top * dpr), Math.round(h * dpr), y0 + top, h, CURRENT_W - off, w)
   }
   ctx.globalCompositeOperation = 'source-over'
   ctx.globalAlpha = 1
@@ -493,7 +538,8 @@ function frame(ctx: CanvasRenderingContext2D, w: World, p: Palette, t: number, d
   if (p.weather === 'fog') {
     const off = (t * 9) % CLOUD_W
     ctx.globalAlpha = 0.5
-    for (let x = -off; x < W; x += CLOUD_W) ctx.drawImage(n > 0.5 ? w.cloudsNight : w.cloudsDay, x, y0 - riverH * 0.6, CLOUD_W, riverH * 1.1)
+    const fog = n > 0.5 ? w.cloudsNight : w.cloudsDay
+    tileX(ctx, fog, 0, fog.height, y0 - riverH * 0.6, riverH * 1.1, off, w)
     ctx.globalAlpha = 1
   }
 }
