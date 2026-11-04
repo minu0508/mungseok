@@ -1,5 +1,8 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer } from 'ws';
 
@@ -7,6 +10,7 @@ const PORT = Number(process.env.PORT) || 3000;
 const ROOM_MAX = 30;                                        // 한 둔치(방)에 앉을 수 있는 사람 수
 const MIN_RECORD = Number(process.env.MIN_RECORD_SECS) || 10; // 이보다 짧게 앉으면 순위에 안 올린다
 const BOARD_SIZE = 10;
+const DATA_FILE = process.env.DATA_FILE || fileURLToPath(new URL('./data/board.json', import.meta.url));
 
 const html = await readFile(new URL('./public/index.html', import.meta.url));
 
@@ -21,9 +25,30 @@ const server = http.createServer((req, res) => {
 });
 
 // --- 오늘의 순위 (한국 시간 자정에 초기화) ---
-// shortcut: 순위는 메모리에만 있어 서버를 다시 켜면 사라진다. 사람이 늘면 Redis·SQLite 로 옮긴다.
+// shortcut: JSON 파일 하나에 저장한다. 서버가 한 대이고 디스크가 유지될 때만 남는다.
+// 서버를 여러 대로 늘리거나 디스크가 지워지는 호스팅에 올리면 DB 로 옮긴다.
 const kstDay = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
-let board = { day: kstDay(), list: [] };
+
+function loadBoard() {
+  try {
+    const b = JSON.parse(readFileSync(DATA_FILE, 'utf8'));
+    const ok = e => e && typeof e.name === 'string' && Number.isFinite(e.secs) && Number.isFinite(e.at);
+    if (b.day === kstDay() && Array.isArray(b.list)) return { day: b.day, list: b.list.filter(ok).slice(0, BOARD_SIZE) };
+  } catch (e) {
+    if (e.code !== 'ENOENT') console.error(`board load failed, starting empty: ${e.message}`);
+  }
+  return { day: kstDay(), list: [] };
+}
+function saveBoard() {
+  try {
+    mkdirSync(dirname(DATA_FILE), { recursive: true });
+    writeFileSync(DATA_FILE + '.tmp', JSON.stringify(board));
+    renameSync(DATA_FILE + '.tmp', DATA_FILE); // 쓰다 꺼져도 이전 파일이 깨지지 않게
+  } catch (e) {
+    console.error(`board save failed: ${e.message}`);
+  }
+}
+let board = loadBoard();
 
 function record(name, secs) {
   if (board.day !== kstDay()) board = { day: kstDay(), list: [] };
@@ -33,7 +58,9 @@ function record(name, secs) {
   board.list.sort((a, b) => b.secs - a.secs || a.at - b.at);
   board.list.length = Math.min(board.list.length, BOARD_SIZE);
   const i = board.list.indexOf(entry);
-  return i === -1 ? null : i + 1;
+  if (i === -1) return null;
+  saveBoard();
+  return i + 1;
 }
 const boardMsg = () => ({ t: 'board', list: board.list.map(({ name, secs }) => ({ name, secs })) });
 

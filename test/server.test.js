@@ -1,22 +1,32 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const PORT = 39417;
+const tmp = mkdtempSync(join(tmpdir(), 'mungseok-'));  // 테스트 기록이 실제 순위 파일에 섞이지 않게
 let proc;
+const running = new Set();  // 테스트가 중간에 실패해도 띄운 서버를 모두 끈다
 
-before(async () => {
-  proc = spawn(process.execPath, ['server.js'], { env: { ...process.env, PORT, MIN_RECORD_SECS: '1' } });
-  await new Promise((ok, fail) => {
-    proc.stdout.on('data', d => String(d).includes('listening') && ok());
-    proc.on('exit', code => fail(new Error(`server exited ${code}`)));
+function start(port, dataFile) {
+  const p = spawn(process.execPath, ['server.js'], { env: { ...process.env, PORT: port, MIN_RECORD_SECS: '1', DATA_FILE: dataFile } });
+  running.add(p);
+  p.once('exit', () => running.delete(p));
+  return new Promise((ok, fail) => {
+    p.stdout.on('data', d => String(d).includes('listening') && ok(p));
+    p.on('exit', code => fail(new Error(`server exited ${code}`)));
   });
-});
-after(() => proc.kill());
+}
+const stop = p => new Promise(r => { p.once('exit', r); p.kill(); });
+
+before(async () => { proc = await start(PORT, join(tmp, 'main.json')); });
+after(async () => { await Promise.all([...running].map(stop)); rmSync(tmp, { recursive: true, force: true }); });
 
 // 메시지를 종류별로 모아 두고, 원하는 것이 올 때까지 기다린다
-function client() {
-  const ws = new WebSocket(`ws://localhost:${PORT}/ws`);
+function client(port = PORT) {
+  const ws = new WebSocket(`ws://localhost:${port}/ws`);
   const inbox = [];
   const waiters = [];
   ws.onmessage = e => {
@@ -82,6 +92,37 @@ test('garbage input does not crash the server or record anything', async () => {
   c.ws.close();
   const res = await fetch(`http://localhost:${PORT}/health`);
   assert.equal(await res.text(), 'ok');
+});
+
+test('the board survives a restart, and a corrupt file starts empty', async () => {
+  const port = PORT + 1, file = join(tmp, 'restart.json');
+  let p = await start(port, file);
+  const a = client(port);
+  await a.open;
+  await a.next(m => m.t === 'welcome');
+  a.send({ t: 'sit', name: '버틴사람' });
+  await a.next(m => m.t === 'sit');
+  await sleep(1100);
+  a.send({ t: 'up' });
+  assert.equal((await a.next(m => m.t === 'out')).rank, 1);
+  a.ws.close();
+  await stop(p);
+
+  p = await start(port, file);
+  const b = client(port);
+  await b.open;
+  const board = await b.next(m => m.t === 'board');
+  assert.equal(board.list[0]?.name, '버틴사람', 'record kept across restart');
+  b.ws.close();
+  await stop(p);
+
+  writeFileSync(file, '{not json');
+  p = await start(port, file);
+  const c = client(port);
+  await c.open;
+  assert.deepEqual((await c.next(m => m.t === 'board')).list, []);
+  c.ws.close();
+  await stop(p);
 });
 
 test('leaving while seated tells the room', async () => {
