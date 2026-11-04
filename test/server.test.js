@@ -13,7 +13,7 @@ const running = new Set();  // 테스트가 중간에 실패해도 띄운 서버
 
 // 한 PC 에서 여러 사람을 흉내 내므로 기본은 IP 제한을 끈다. 제한 자체는 따로 시험한다
 function start(port, dataFile, env = {}) {
-  const p = spawn(process.execPath, ['server.js'], { env: { ...process.env, PORT: port, MIN_RECORD_SECS: '1', DATA_FILE: dataFile, COUNT_EVERY_MS: '200', ONE_PER_IP: '0', ...env } });
+  const p = spawn(process.execPath, ['server.js'], { env: { ...process.env, PORT: port, MIN_RECORD_SECS: '1', DATA_FILE: dataFile, COUNT_EVERY_MS: '200', ONE_PER_IP: '0', WEATHER: '0', ...env } });
   running.add(p);
   p.once('exit', () => running.delete(p));
   return new Promise((ok, fail) => {
@@ -186,6 +186,54 @@ test('blocked names are refused before and at sitting', async () => {
   assert.equal((await c.next(m => m.t === 'name')).ok, false);
   await assert.rejects(c.next(m => m.t === 'sit', 600), /timeout/);
   c.ws.close();
+});
+
+test('standing up the instant you sit still gets a result', async () => {
+  const c = client();
+  await c.open;
+  await c.next(m => m.t === 'welcome');
+  c.send({ t: 'sit', name: '움찔' });
+  await c.next(m => m.t === 'sit');
+  c.send({ t: 'up' }); // 앉은 직후, 0.3초가 지나기 전
+  const out = await c.next(m => m.t === 'out', 1500);
+  assert.equal(out.secs, 0);
+  c.ws.close();
+});
+
+test('the board keeps only the best record per person', async () => {
+  const port = PORT + 3;
+  const p = await start(port, join(tmp, 'best.json'));
+  const c = client(port);
+  await c.open;
+  await c.next(m => m.t === 'welcome');
+  const sitFor = async ms => {
+    c.send({ t: 'sit', name: '같은사람' });
+    await c.next(m => m.t === 'sit');
+    await sleep(ms);
+    c.send({ t: 'up' });
+    return c.next(m => m.t === 'out');
+  };
+  assert.equal((await sitFor(2100)).rank, 1);
+  const shorter = await sitFor(1100);
+  assert.equal(shorter.rank, null, 'a shorter sit does not add a second row');
+  assert.equal(shorter.best, 2);
+  assert.equal((await sitFor(3100)).rank, 1, 'a longer sit replaces the old row');
+  c.ws.close();
+  const b = client(port);
+  await b.open;
+  const board = await b.next(m => m.t === 'board');
+  assert.deepEqual(board.list, [{ name: '같은사람', secs: 3 }]);
+  b.ws.close();
+  await stop(p);
+});
+
+test('pages carry security headers and an absolute share-image origin', { skip: !built && 'web/dist 가 없다' }, async () => {
+  const res = await fetch(`http://localhost:${PORT}/`);
+  assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(res.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+  const html = await res.text();
+  assert.doesNotMatch(html, /__ORIGIN__/);
+  assert.match(html, new RegExp(`http://localhost:${PORT}/og\\.png`));
 });
 
 test('leaving while seated tells the room', async () => {

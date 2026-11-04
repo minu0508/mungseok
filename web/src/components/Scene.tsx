@@ -1,21 +1,32 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { motion } from 'motion/react'
+import type { Palette } from '@/lib/sky'
 
 /*
- * 한강 야경을 캔버스에 그린다.
- * 움직이지 않는 부분(하늘·도시·다리·둔치)은 크기가 바뀔 때만 미리 그려 두고,
- * 매 프레임에는 강물(일렁이는 반사 + 하류로 흐르는 물결)과 차·항공등만 그린다.
+ * 한강을 캔버스에 그린다.
+ * - 빌딩 배치는 한 번만 정하고, 낮 버전과 밤 버전을 따로 미리 그려 둔다.
+ * - 하늘 색이 바뀌면(몇십 초에 한 번) 하늘·도시·반사·둔치를 한 장씩 합쳐 둔다.
+ * - 매 프레임에는 강물(일렁이는 반사 + 흐르는 물결), 구름, 차, 항공등, 비·눈·번개만 그린다.
  */
 
+type Win = { x: number; y: number; cool: boolean; a: number }
+type Bld = { x: number; w: number; top: number; kind: 'tower' | 'apt' | 'low'; setback: boolean; crown: boolean; shade: number; wins: Win[] }
 type Car = { x: number; speed: number; lane: 0 | 1 }
 type Blink = { x: number; y: number; phase: number }
+type Drop = { x: number; y: number; v: number; len: number }
+type Flake = { x: number; y: number; v: number; r: number; ph: number }
+type Ripple = { x: number; y: number; age: number; max: number }
 type World = {
   W: number; H: number; dpr: number; y0: number; yB: number; deckY: number
-  city: HTMLCanvasElement; refl: HTMLCanvasElement; current: HTMLCanvasElement; bank: HTMLCanvasElement
-  cars: Car[]; blinks: Blink[]; lampX: number
+  cityDay: HTMLCanvasElement; cityNight: HTMLCanvasElement; lights: HTMLCanvasElement; stars: HTMLCanvasElement
+  cloudsDay: HTMLCanvasElement; cloudsNight: HTMLCanvasElement; current: HTMLCanvasElement; grass: HTMLCanvasElement
+  lampXs: number[]; cars: Car[]; blinks: Blink[]
+  mix: { city: HTMLCanvasElement; refl: HTMLCanvasElement; bank: HTMLCanvasElement } | null
+  drops: Drop[]; flakes: Flake[]; ripples: Ripple[]; flash: number; nextFlash: number
 }
 
 const CURRENT_W = 640
+const CLOUD_W = 1400
 
 function seeded(seed: number) {
   return () => (seed = (seed * 16807) % 2147483647) / 2147483647
@@ -29,234 +40,376 @@ function layer(w: number, h: number, dpr: number) {
   return { c, ctx }
 }
 
+// ---------------------------------------------------------------- 미리 그리기
 function build(W: number, H: number, dpr: number): World {
   const narrow = W < 640
   const y0 = Math.round(H * (narrow ? 0.5 : 0.56))   // 수평선(강 시작)
   const yB = Math.round(H * (narrow ? 0.76 : 0.8))   // 둔치 시작
   const deckY = y0 - Math.max(7, H * 0.013)
-  const k = Math.min(1.4, Math.max(0.6, W / 1440))   // 화면 폭에 따른 건물 크기 배율
+  const k = Math.min(1.4, Math.max(0.6, W / 1440))
   const rnd = seeded(20261104)
-  const blinks: Blink[] = []
 
-  // ---------- 하늘 + 도시 + 다리 ----------
-  const { c: city, ctx } = layer(W, y0, dpr)
-  const { c: lightsC, ctx: lx } = layer(W, y0, dpr) // 반사 줄기용: 불빛만
-
-  const sky = ctx.createLinearGradient(0, 0, 0, y0)
-  sky.addColorStop(0, '#03060d')
-  sky.addColorStop(0.55, '#0a1324')
-  sky.addColorStop(1, '#1d2338')
-  ctx.fillStyle = sky
-  ctx.fillRect(0, 0, W, y0)
-  const glow = ctx.createRadialGradient(W * 0.55, y0, 0, W * 0.55, y0, Math.max(W, H) * 0.65)
-  glow.addColorStop(0, 'rgba(255,150,90,.20)')
-  glow.addColorStop(0.35, 'rgba(190,110,100,.07)')
-  glow.addColorStop(1, 'rgba(0,0,0,0)')
-  ctx.fillStyle = glow
-  ctx.fillRect(0, 0, W, y0)
-  for (let i = 0; i < 160; i++) {
-    const y = rnd() ** 1.6 * y0 * 0.65
-    ctx.fillStyle = `rgba(230,235,255,${(0.15 + rnd() * 0.5) * (1 - y / (y0 * 0.7))})`
-    ctx.fillRect(rnd() * W, y, rnd() < 0.1 ? 1.4 : 0.8, rnd() < 0.1 ? 1.4 : 0.8)
-  }
-
-  const lampXs: number[] = [] // 다리 가로등 위치: 물 위에 긴 금빛 줄기를 만든다
-  // refl: 물에 비치는 세기. 창문은 약하게 비쳐야 물이 자글자글해지지 않는다
-  const light = (x: number, y: number, w: number, h: number, color: string, a: number, refl = 0.3) => {
-    ctx.globalAlpha = a; ctx.fillStyle = color; ctx.fillRect(x, y, w, h)
-    lx.globalAlpha = a * refl; lx.fillStyle = color; lx.fillRect(x, y, w, h)
-    ctx.globalAlpha = 1; lx.globalAlpha = 1
-  }
-
-  // 먼 스카이라인: 안개에 묻혀 흐릿하다
+  // 먼 스카이라인
+  const far: { x: number; w: number; h: number; wins: [number, number][] }[] = []
   for (let x = -10; x < W;) {
     const w = (10 + rnd() * 26) * k, h = (0.025 + rnd() * 0.06) * H
-    ctx.fillStyle = '#141c30'
-    ctx.fillRect(x, deckY - h, w, h + (y0 - deckY))
-    for (let i = 0; i < w * h * 0.004; i++) light(x + rnd() * w, deckY - h + rnd() * h, 1, 1, '#ffd49a', 0.25)
+    const wins: [number, number][] = []
+    for (let i = 0; i < w * h * 0.004; i++) wins.push([x + rnd() * w, deckY - h + rnd() * h])
+    far.push({ x, w, h, wins })
     x += w + rnd() * 3
   }
-
-  // 남산과 타워
-  const nx = W * (narrow ? 0.74 : 0.7), peak = deckY - H * 0.085
-  ctx.fillStyle = '#10182a'
-  ctx.beginPath()
-  ctx.moveTo(nx - W * 0.16, deckY)
-  ctx.bezierCurveTo(nx - W * 0.07, peak - H * 0.01, nx + W * 0.05, peak - H * 0.012, nx + W * 0.15, deckY)
-  ctx.fill()
-  const th = H * 0.1, tw = Math.max(2, 3 * k)
-  ctx.fillStyle = '#121a2d'
-  ctx.fillRect(nx - tw / 2, peak - th, tw, th)
-  ctx.fillRect(nx - 6 * k, peak - th * 0.78, 12 * k, 5 * k)
-  ctx.fillRect(nx - 0.5, peak - th - H * 0.03, 1, H * 0.03)
-  for (let i = 0; i < 6; i++) light(nx - 5 * k + i * 2 * k, peak - th * 0.78 + 2 * k, 1, 1, '#fff1d6', 0.9)
-  blinks.push({ x: nx, y: peak - th - H * 0.03, phase: 0 })
-
+  // 남산
+  const nx = W * (narrow ? 0.74 : 0.7), peak = deckY - H * 0.085, th = H * 0.1, tw = Math.max(2, 3 * k)
   // 가까운 스카이라인: 가운데에 고층 빌딩, 양옆은 아파트 단지. 왼쪽 하늘은 글자 자리로 낮게 비운다
+  const near: Bld[] = []
+  const blinks: Blink[] = [{ x: nx, y: peak - th - H * 0.03, phase: 0 }]
   for (let x = -6; x < W;) {
     const pos = x / W
     const core = narrow ? pos > 0.15 && pos < 0.55 : pos > 0.36 && pos < 0.62
-    const kind = rnd() < (core ? 0.62 : 0.1) ? 'tower' : rnd() < (pos > 0.6 ? 0.7 : 0.45) ? 'apt' : 'low'
+    const kind: Bld['kind'] = rnd() < (core ? 0.62 : 0.1) ? 'tower' : rnd() < (pos > 0.6 ? 0.7 : 0.45) ? 'apt' : 'low'
     const w = (kind === 'tower' ? 16 + rnd() * 22 : kind === 'apt' ? 34 + rnd() * 46 : 18 + rnd() * 30) * k
     const lowSide = !narrow && pos < 0.3 ? 0.65 : 1
     const h = (kind === 'tower' ? 0.1 + rnd() * 0.14 : kind === 'apt' ? 0.05 + rnd() * 0.05 : 0.025 + rnd() * 0.03) * H * lowSide
-    const top = deckY - h
-    // 남산 앞은 낮게 비워 둔다
     if (Math.abs(x + w / 2 - nx) < W * 0.08 && kind === 'tower') { x += w; continue }
-    ctx.fillStyle = '#0a0f1c'
-    ctx.fillRect(x, top, w, deckY - top + 1)
-    if (kind === 'tower' && rnd() < 0.6) { // 꼭대기를 한 단 줄인다
-      ctx.fillRect(x + w * 0.2, top - h * 0.08, w * 0.6, h * 0.08)
-      if (rnd() < 0.5) light(x + w * 0.2, top - h * 0.08, w * 0.6, 1, '#ffd9a8', 0.55, 1)
-    }
-    ctx.fillStyle = 'rgba(255,255,255,.035)' // 왼쪽 모서리에 도시 불빛이 스친다
-    ctx.fillRect(x, top, 1, deckY - top)
+    const top = deckY - h
+    const setback = kind === 'tower' && rnd() < 0.6
+    const crown = setback && rnd() < 0.5
     if (kind === 'tower' && rnd() < 0.5) blinks.push({ x: x + w / 2, y: top - h * 0.08 - 2, phase: rnd() * 6 })
-
     const lit = 0.08 + rnd() * 0.32
     const gx = kind === 'apt' ? 5 : 4, gy = kind === 'apt' ? 5 : 4
     const floorLit = rnd() < 0.15 ? Math.floor(rnd() * (h / gy)) : -1
+    const wins: Win[] = []
     for (let row = 0, wy = top + 3; wy < deckY - 3; wy += gy, row++)
       for (let wx = x + 2; wx < x + w - 2; wx += gx)
-        if (rnd() < lit || row === floorLit) {
-          const cool = rnd() < 0.25
-          light(wx, wy, 1.6, 1.2, cool ? '#d7e6ff' : '#ffd49a', 0.45 + rnd() * 0.5)
-        }
+        if (rnd() < lit || row === floorLit) wins.push({ x: wx, y: wy, cool: rnd() < 0.25, a: 0.45 + rnd() * 0.5 })
+    near.push({ x, w, top, kind, setback, crown, shade: rnd(), wins })
     x += w + 1 + rnd() * 3
   }
+  const lampXs: number[] = []
+  for (let x = 14; x < W; x += 46 * k) lampXs.push(x)
 
-  // 다리: 상판, 교각, 가로등
-  ctx.fillStyle = '#05080f'
-  ctx.fillRect(0, deckY, W, 3)
-  for (let x = W / 14; x < W; x += W / 7) ctx.fillRect(x - 2, deckY + 3, 4, y0 - deckY - 3)
-  for (let x = 14; x < W; x += 46 * k) {
-    ctx.fillStyle = '#05080f'
-    ctx.fillRect(x, deckY - 5, 0.8, 5)
-    const g = ctx.createRadialGradient(x, deckY - 5, 0, x, deckY - 5, 7)
-    g.addColorStop(0, 'rgba(255,199,122,.45)')
-    g.addColorStop(1, 'rgba(255,199,122,0)')
-    ctx.fillStyle = g
-    ctx.fillRect(x - 7, deckY - 12, 14, 14)
-    light(x - 0.6, deckY - 5.6, 1.6, 1.2, '#ffc77a', 1, 0)
-    lampXs.push(x)
+  const { c: lights, ctx: lx } = layer(W, y0, dpr) // 물에 비칠 밤 불빛 (창문은 약하게)
+  const drawCity = (mode: 'day' | 'night') => {
+    const { c, ctx } = layer(W, y0, dpr)
+    const night = mode === 'night'
+    const light = (x: number, y: number, w: number, h: number, color: string, a: number, refl = 0.3) => {
+      ctx.globalAlpha = a; ctx.fillStyle = color; ctx.fillRect(x, y, w, h); ctx.globalAlpha = 1
+      if (night && refl) { lx.globalAlpha = a * refl; lx.fillStyle = color; lx.fillRect(x, y, w, h); lx.globalAlpha = 1 }
+    }
+    // 먼 스카이라인: 낮에는 대기에 묻혀 푸르스름하다
+    for (const f of far) {
+      ctx.fillStyle = night ? '#141c30' : '#9ba8bd'
+      ctx.fillRect(f.x, deckY - f.h, f.w, f.h + (y0 - deckY))
+      if (night) for (const [wx, wy] of f.wins) light(wx, wy, 1, 1, '#ffd49a', 0.25)
+    }
+    // 남산과 타워
+    ctx.fillStyle = night ? '#10182a' : '#6f817c'
+    ctx.beginPath()
+    ctx.moveTo(nx - W * 0.16, deckY)
+    ctx.bezierCurveTo(nx - W * 0.07, peak - H * 0.01, nx + W * 0.05, peak - H * 0.012, nx + W * 0.15, deckY)
+    ctx.fill()
+    ctx.fillStyle = night ? '#121a2d' : '#d9dde3'
+    ctx.fillRect(nx - tw / 2, peak - th, tw, th)
+    ctx.fillRect(nx - 6 * k, peak - th * 0.78, 12 * k, 5 * k)
+    ctx.fillRect(nx - 0.5, peak - th - H * 0.03, 1, H * 0.03)
+    if (night) for (let i = 0; i < 6; i++) light(nx - 5 * k + i * 2 * k, peak - th * 0.78 + 2 * k, 1, 1, '#fff1d6', 0.9)
+    // 가까운 빌딩
+    const DAY = ['#5a6880', '#66748a', '#4f5d74', '#728098', '#5f6b7d', '#6b6f78']
+    for (const b of near) {
+      const h = deckY - b.top
+      ctx.fillStyle = night ? '#0a0f1c' : DAY[Math.floor(b.shade * DAY.length)]
+      ctx.fillRect(b.x, b.top, b.w, h + 1)
+      if (b.setback) ctx.fillRect(b.x + b.w * 0.2, b.top - h * 0.08, b.w * 0.6, h * 0.08)
+      if (night) {
+        if (b.crown) light(b.x + b.w * 0.2, b.top - h * 0.08, b.w * 0.6, 1, '#ffd9a8', 0.55, 1)
+        ctx.fillStyle = 'rgba(255,255,255,.035)'
+        ctx.fillRect(b.x, b.top, 1, h)
+        for (const wi of b.wins) light(wi.x, wi.y, 1.6, 1.2, wi.cool ? '#d7e6ff' : '#ffd49a', wi.a)
+      } else {
+        // 낮: 햇빛 받는 면과 그늘진 면, 유리창 줄
+        ctx.fillStyle = 'rgba(255,255,255,.14)'
+        ctx.fillRect(b.x, b.top, Math.max(1, b.w * 0.18), h)
+        ctx.fillStyle = 'rgba(0,10,30,.12)'
+        ctx.fillRect(b.x + b.w * 0.82, b.top, b.w * 0.18, h)
+        const gy = b.kind === 'apt' ? 5 : 4
+        for (let wy = b.top + 3; wy < deckY - 3; wy += gy) {
+          ctx.fillStyle = b.kind === 'tower' ? 'rgba(190,215,240,.18)' : 'rgba(20,30,50,.16)'
+          ctx.fillRect(b.x + 2, wy, b.w - 4, 1.2)
+        }
+      }
+    }
+    // 다리: 상판, 교각, 가로등
+    ctx.fillStyle = night ? '#05080f' : '#39414d'
+    ctx.fillRect(0, deckY, W, 3)
+    for (let x = W / 14; x < W; x += W / 7) ctx.fillRect(x - 2, deckY + 3, 4, y0 - deckY - 3)
+    for (const x of lampXs) {
+      ctx.fillStyle = night ? '#05080f' : '#39414d'
+      ctx.fillRect(x, deckY - 5, 0.8, 5)
+      if (!night) continue
+      const g = ctx.createRadialGradient(x, deckY - 5, 0, x, deckY - 5, 7)
+      g.addColorStop(0, 'rgba(255,199,122,.45)')
+      g.addColorStop(1, 'rgba(255,199,122,0)')
+      ctx.fillStyle = g
+      ctx.fillRect(x - 7, deckY - 12, 14, 14)
+      light(x - 0.6, deckY - 5.6, 1.6, 1.2, '#ffc77a', 1, 0)
+    }
+    return c
+  }
+  const cityNight = drawCity('night')
+  const cityDay = drawCity('day')
+
+  // 별
+  const { c: stars, ctx: sx } = layer(W, y0, dpr)
+  for (let i = 0; i < 170; i++) {
+    const y = rnd() ** 1.6 * y0 * 0.65
+    sx.fillStyle = `rgba(230,235,255,${(0.15 + rnd() * 0.55) * (1 - y / (y0 * 0.7))})`
+    const s = rnd() < 0.1 ? 1.4 : 0.8
+    sx.fillRect(rnd() * W, y, s, s)
   }
 
-  // ---------- 강물 반사: 도시를 뒤집어 어둡게, 불빛은 세로로 길게 늘린다 ----------
+  // 구름: 부드러운 덩어리를 가로로 이어 붙일 수 있게 그린다
+  const clouds = (fill: (a: number) => string) => {
+    const { c, ctx } = layer(CLOUD_W, y0 * 0.75, dpr)
+    const r2 = seeded(77)
+    for (let i = 0; i < 46; i++) {
+      const cx = r2() * CLOUD_W, cy = (0.15 + r2() * 0.75) * y0 * 0.75, rx = (60 + r2() * 160) * k, ry = rx * (0.22 + r2() * 0.18)
+      for (const off of [0, -CLOUD_W, CLOUD_W]) {
+        const g = ctx.createRadialGradient(cx + off, cy, 0, cx + off, cy, rx)
+        g.addColorStop(0, fill(0.55 + r2() * 0.25))
+        g.addColorStop(1, fill(0))
+        ctx.save()
+        ctx.translate(cx + off, cy)
+        ctx.scale(1, ry / rx)
+        ctx.translate(-(cx + off), -cy)
+        ctx.fillStyle = g
+        ctx.fillRect(cx + off - rx, cy - rx, rx * 2, rx * 2)
+        ctx.restore()
+      }
+    }
+    return c
+  }
+  const cloudsDay = clouds(a => `rgba(236,240,246,${a})`)
+  const cloudsNight = clouds(a => `rgba(38,44,62,${a})`)
+
+  // 물결 무늬
   const riverH = yB - y0
-  const { c: refl, ctx: rx } = layer(W, riverH, dpr)
-  // 건물 실루엣은 번져서 형태만 남기고(창문 점이 격자로 비치지 않게), 불빛은 세로 줄기로 길게 늘인다
-  rx.save()
-  rx.filter = 'blur(3px)'
-  rx.translate(0, y0)
-  rx.scale(1, -1)
-  rx.globalAlpha = 0.34
-  rx.drawImage(city, 0, 0, W, y0)
-  rx.restore()
-  // 도시 불빛은 은은하게, 다리 가로등은 수면 끝까지 닿는 긴 줄기로
-  const streak = (src: HTMLCanvasElement, from: number, stretch: number, blur: number, alpha: number) => {
-    rx.save()
-    rx.filter = `blur(${blur}px)`
-    rx.globalCompositeOperation = 'lighter'
-    rx.translate(0, from * stretch)
-    rx.scale(1, -stretch)
-    rx.globalAlpha = alpha
-    rx.drawImage(src, 0, 0, W, y0)
-    rx.restore()
-  }
-  streak(lightsC, y0, 3.4, 2.4, 0.7)
-  streak(lightsC, y0, 1.6, 1.2, 0.5)
-  rx.save()
-  rx.filter = 'blur(1.4px)'
-  rx.globalCompositeOperation = 'lighter'
-  for (const x of lampXs) {
-    const len = riverH * (0.55 + rnd() * 0.45)
-    const g = rx.createLinearGradient(0, 0, 0, len)
-    g.addColorStop(0, 'rgba(255,196,120,.75)')
-    g.addColorStop(0.35, 'rgba(255,180,100,.32)')
-    g.addColorStop(1, 'rgba(255,170,90,0)')
-    rx.fillStyle = g
-    rx.fillRect(x - 1.3, 2, 2.6, len)
-  }
-  rx.restore()
-  const fade = rx.createLinearGradient(0, 0, 0, riverH)
-  fade.addColorStop(0, 'rgba(255,150,90,.08)')
-  fade.addColorStop(1, 'rgba(0,0,0,0)')
-  rx.fillStyle = fade
-  rx.fillRect(0, 0, W, riverH)
-
-  // ---------- 물결 무늬: 가로로 이어 붙여 흘려보낸다 ----------
   const { c: current, ctx: cx } = layer(CURRENT_W, riverH, dpr)
   for (let i = 0; i < 520; i++) {
     const d = rnd() ** 0.7, y = d * riverH, len = (12 + rnd() * 90) * (0.4 + d)
     const x = rnd() * CURRENT_W
     cx.fillStyle = rnd() < 0.2 ? `rgba(255,200,140,${0.03 + rnd() * 0.06})` : `rgba(160,185,225,${0.025 + rnd() * 0.06})`
-    for (const off of [0, -CURRENT_W]) cx.fillRect(x + off, y, len, d > 0.6 ? 1 : 0.6) // 이음매가 보이지 않게 두 번
+    for (const off of [0, -CURRENT_W]) cx.fillRect(x + off, y, len, d > 0.6 ? 1 : 0.6)
   }
-
-  // ---------- 둔치 ----------
+  // 잔디 결
   const bankH = H - yB
-  const { c: bank, ctx: bx } = layer(W, bankH, dpr)
-  const edge = Math.max(8, H * 0.014)
-  bx.fillStyle = '#0a0e15'
-  bx.fillRect(0, 0, W, edge)
-  bx.fillStyle = 'rgba(255,214,170,.10)'
-  bx.fillRect(0, 0, W, 1)
-  const lawn = bx.createLinearGradient(0, edge, 0, bankH)
-  lawn.addColorStop(0, '#0b100e')
-  lawn.addColorStop(1, '#040605')
-  bx.fillStyle = lawn
-  bx.fillRect(0, edge, W, bankH - edge)
-  for (let i = 0; i < W * bankH * 0.01; i++) { // 잔디 결
-    bx.fillStyle = `rgba(120,150,110,${0.02 + rnd() * 0.04})`
-    bx.fillRect(rnd() * W, edge + rnd() * (bankH - edge), 1, 2 + rnd() * 3)
+  const { c: grass, ctx: gx } = layer(W, bankH, dpr)
+  for (let i = 0; i < W * bankH * 0.012; i++) {
+    gx.fillStyle = `rgba(150,180,130,${0.03 + rnd() * 0.06})`
+    gx.fillRect(rnd() * W, rnd() * bankH, 1, 2 + rnd() * 3)
   }
 
-  const cars: Car[] = Array.from({ length: Math.round(W / 45) }, () => ({
-    x: rnd() * W, speed: 26 + rnd() * 34, lane: rnd() < 0.5 ? 0 : 1,
-  }))
-  return { W, H, dpr, y0, yB, deckY, city, refl, current, bank, cars, blinks, lampX: W * (narrow ? 0.9 : 0.07) }
+  const cars: Car[] = Array.from({ length: Math.round(W / 45) }, () => ({ x: rnd() * W, speed: 26 + rnd() * 34, lane: rnd() < 0.5 ? 0 : 1 }))
+  return {
+    W, H, dpr, y0, yB, deckY, cityDay, cityNight, lights, stars, cloudsDay, cloudsNight, current, grass, lampXs, cars, blinks,
+    mix: null, drops: [], flakes: [], ripples: [], flash: 0, nextFlash: 4,
+  }
 }
 
-function frame(ctx: CanvasRenderingContext2D, w: World, t: number, dt: number) {
+// ---------------------------------------------------------------- 하늘 색이 바뀔 때 합치기
+function compose(w: World, p: Palette) {
+  const { W, H, dpr, y0, yB } = w
+  const n = p.night, riverH = yB - y0, bankH = H - yB
+
+  const { c: city, ctx } = layer(W, y0, dpr)
+  const sky = ctx.createLinearGradient(0, 0, 0, y0)
+  sky.addColorStop(0, p.top)
+  sky.addColorStop(0.55, p.mid)
+  sky.addColorStop(1, p.horizon)
+  ctx.fillStyle = sky
+  ctx.fillRect(0, 0, W, y0)
+  const gx = p.sun ? p.sun.x * W : W * 0.55
+  const glow = ctx.createRadialGradient(gx, y0, 0, gx, y0, Math.max(W, H) * 0.65)
+  glow.addColorStop(0, p.glow)
+  glow.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = glow
+  ctx.fillRect(0, 0, W, y0)
+  ctx.globalAlpha = p.stars
+  ctx.drawImage(w.stars, 0, 0, W, y0)
+  ctx.globalAlpha = 1
+
+  // 해와 달 (구름이 많으면 흐려진다)
+  const veil = 1 - p.cloud * 0.85
+  if (p.sun && n < 0.85 && p.cloud < 0.6) { // 구름이 두꺼우면 해가 보이지 않는다
+    const sx = p.sun.x * W, sy = y0 - (0.06 + p.sun.alt * 0.62) * y0, low = 1 - p.sun.alt
+    const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, 140)
+    g.addColorStop(0, `rgba(255,${Math.round(236 - low * 70)},${Math.round(200 - low * 110)},${0.55 * veil})`)
+    g.addColorStop(1, 'rgba(255,220,180,0)')
+    ctx.fillStyle = g
+    ctx.fillRect(sx - 140, sy - 140, 280, 280)
+    ctx.globalAlpha = veil
+    ctx.fillStyle = low > 0.75 ? '#ffc58a' : '#fff6e2'
+    ctx.beginPath(); ctx.arc(sx, sy, 11, 0, Math.PI * 2); ctx.fill()
+    ctx.globalAlpha = 1
+  }
+  if (n > 0.5 && p.cloud < 0.6) {
+    const mx = W * (W < 640 ? 0.78 : 0.64), my = y0 * 0.16, a = (n - 0.5) * 2 * veil // 오른쪽 카드에 가리지 않는 자리
+    const g = ctx.createRadialGradient(mx, my, 0, mx, my, 70)
+    g.addColorStop(0, `rgba(220,228,255,${0.22 * a})`)
+    g.addColorStop(1, 'rgba(220,228,255,0)')
+    ctx.fillStyle = g
+    ctx.fillRect(mx - 70, my - 70, 140, 140)
+    ctx.globalAlpha = a
+    ctx.fillStyle = '#f1ecdc'
+    ctx.beginPath(); ctx.arc(mx, my, 8, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = p.top // 초승달 그림자
+    ctx.beginPath(); ctx.arc(mx + 3.5, my - 2, 7.5, 0, Math.PI * 2); ctx.fill()
+    ctx.globalAlpha = 1
+  }
+
+  // 도시: 낮 그림 위에 밤 그림을 밤의 세기만큼 겹친다
+  ctx.drawImage(w.cityDay, 0, 0, W, y0)
+  ctx.globalAlpha = n
+  ctx.drawImage(w.cityNight, 0, 0, W, y0)
+  ctx.globalAlpha = 1
+  // 대기: 수평선 쪽이 하늘색으로 뿌옇다. 안개·비 오는 날은 더 짙다
+  const hazeA = { clear: 0.18, clouds: 0.22, overcast: 0.32, fog: 0.75, rain: 0.42, snow: 0.45, storm: 0.38 }[p.weather] * (1 - n * 0.5)
+  const haze = ctx.createLinearGradient(0, y0 * 0.45, 0, y0)
+  haze.addColorStop(0, 'rgba(0,0,0,0)')
+  haze.addColorStop(1, p.horizon)
+  ctx.globalAlpha = hazeA
+  ctx.fillStyle = haze
+  ctx.fillRect(0, 0, W, y0)
+  ctx.globalAlpha = 1
+
+  // 반사
+  const { c: refl, ctx: rx } = layer(W, riverH, dpr)
+  rx.save()
+  rx.filter = 'blur(3px)'
+  rx.translate(0, y0)
+  rx.scale(1, -1)
+  rx.globalAlpha = 0.34 + (1 - n) * 0.26
+  rx.drawImage(city, 0, 0, W, y0)
+  rx.restore()
+  if (n > 0.05) {
+    for (const [stretch, blur, a] of [[3.4, 2.4, 0.7], [1.6, 1.2, 0.5]] as const) {
+      rx.save()
+      rx.filter = `blur(${blur}px)`
+      rx.globalCompositeOperation = 'lighter'
+      rx.translate(0, y0 * stretch)
+      rx.scale(1, -stretch)
+      rx.globalAlpha = a * n
+      rx.drawImage(w.lights, 0, 0, W, y0)
+      rx.restore()
+    }
+    rx.save()
+    rx.filter = 'blur(1.4px)'
+    rx.globalCompositeOperation = 'lighter'
+    const r2 = seeded(31)
+    for (const x of w.lampXs) {
+      const len = riverH * (0.55 + r2() * 0.45)
+      const g = rx.createLinearGradient(0, 0, 0, len)
+      g.addColorStop(0, `rgba(255,196,120,${0.75 * n})`)
+      g.addColorStop(0.35, `rgba(255,180,100,${0.32 * n})`)
+      g.addColorStop(1, 'rgba(255,170,90,0)')
+      rx.fillStyle = g
+      rx.fillRect(x - 1.3, 2, 2.6, len)
+    }
+    rx.restore()
+  }
+  if (p.sun && n < 0.8) { // 해 아래로 반짝이는 물빛 길
+    const sx = p.sun.x * W, low = 1 - p.sun.alt, a = (1 - n) * (1 - p.cloud * 0.8)
+    const g = rx.createLinearGradient(0, 0, 0, riverH)
+    g.addColorStop(0, `rgba(255,${Math.round(230 - low * 60)},${Math.round(190 - low * 90)},${0.5 * a})`)
+    g.addColorStop(1, 'rgba(255,220,170,0)')
+    rx.save()
+    rx.filter = 'blur(6px)'
+    rx.globalCompositeOperation = 'lighter'
+    rx.fillStyle = g
+    rx.beginPath()
+    rx.moveTo(sx - 8, 0); rx.lineTo(sx + 8, 0); rx.lineTo(sx + 70, riverH); rx.lineTo(sx - 70, riverH)
+    rx.fill()
+    rx.restore()
+  }
+
+  // 둔치
+  const { c: bank, ctx: bx } = layer(W, bankH, dpr)
+  const edge = Math.max(8, H * 0.014)
+  bx.fillStyle = p.weather === 'snow' ? (n > 0.5 ? '#2c3340' : '#b9c0c8') : n > 0.5 ? '#0a0e15' : '#59605f'
+  bx.fillRect(0, 0, W, edge)
+  bx.fillStyle = `rgba(255,214,170,${0.04 + 0.06 * n})`
+  bx.fillRect(0, 0, W, 1)
+  const lawn = bx.createLinearGradient(0, edge, 0, bankH)
+  lawn.addColorStop(0, p.bank[0])
+  lawn.addColorStop(1, p.bank[1])
+  bx.fillStyle = lawn
+  bx.fillRect(0, edge, W, bankH - edge)
+  bx.globalAlpha = p.weather === 'snow' ? 0.15 : 0.35 + (1 - n) * 0.5
+  bx.drawImage(w.grass, 0, 0, W, bankH)
+  bx.globalAlpha = 1
+  if (n > 0.2) { // 화면 밖 가로등이 잔디 위에 떨어뜨린 빛
+    const lampX = W * (W < 640 ? 0.9 : 0.07)
+    const pool = bx.createRadialGradient(lampX, bankH * 1.1, 0, lampX, bankH * 1.1, W * 0.34)
+    pool.addColorStop(0, `rgba(255,190,120,${0.16 * n})`)
+    pool.addColorStop(1, 'rgba(255,190,120,0)')
+    bx.fillStyle = pool
+    bx.fillRect(0, 0, W, bankH)
+  }
+
+  w.mix = { city, refl, bank }
+}
+
+// ---------------------------------------------------------------- 매 프레임
+const RAIN = { rain: 1, storm: 1.4 } as Record<string, number>
+
+function frame(ctx: CanvasRenderingContext2D, w: World, p: Palette, t: number, dt: number) {
   const { W, H, dpr, y0, yB, deckY } = w
-  const riverH = yB - y0
+  if (!w.mix) return
+  const riverH = yB - y0, n = p.night
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.globalAlpha = 1
   ctx.globalCompositeOperation = 'source-over'
-  ctx.drawImage(w.city, 0, 0, W, y0)
+  ctx.drawImage(w.mix.city, 0, 0, W, y0)
 
+  // 구름: 바람 따라 천천히 흐른다
+  if (p.cloud > 0.1) {
+    const off = (t * 5) % CLOUD_W, ch = y0 * 0.75
+    for (const [img, a] of [[w.cloudsDay, (1 - n)], [w.cloudsNight, n]] as const) {
+      if (a < 0.02) continue
+      ctx.globalAlpha = a * Math.min(1, p.cloud * 1.1)
+      for (let x = -off; x < W; x += CLOUD_W) ctx.drawImage(img, x, 0, CLOUD_W, ch)
+    }
+    ctx.globalAlpha = 1
+  }
   // 항공 장애등
-  for (const b of w.blinks) {
+  if (n > 0.3) for (const b of w.blinks) {
     const a = Math.max(0, Math.sin(t * 2.1 + b.phase)) ** 3
-    ctx.fillStyle = `rgba(255,70,60,${0.25 + a * 0.75})`
+    ctx.fillStyle = `rgba(255,70,60,${(0.25 + a * 0.75) * n})`
     ctx.fillRect(b.x - 1, b.y - 1, 2, 2)
   }
-  // 다리 위 차: 위 차선은 전조등(오른쪽으로), 아래 차선은 후미등(왼쪽으로)
+  // 다리 위 차
   for (const c of w.cars) {
-    c.x = (c.x + (c.lane ? -1 : 1) * c.speed * dt + W + 20) % (W + 20) // 0..W+20 를 돌고, 화면 밖 10px 에서 나타난다
-    ctx.fillStyle = c.lane ? 'rgba(255,80,70,.9)' : 'rgba(255,244,220,.95)'
-    ctx.fillRect(c.x - 10, deckY - (c.lane ? 0.5 : 2), 2, 1.2)
+    c.x = (c.x + (c.lane ? -1 : 1) * c.speed * dt + W + 20) % (W + 20)
+    ctx.fillStyle = n > 0.4 ? (c.lane ? 'rgba(255,80,70,.9)' : 'rgba(255,244,220,.95)') : (c.lane ? '#d9dde3' : '#2d333d')
+    ctx.fillRect(c.x - 10, deckY - (c.lane ? 0.5 : 2), n > 0.4 ? 2 : 3, 1.3)
   }
 
-  // 강물 바탕
+  // 강물 바탕 + 반사 (한 줄씩 옆으로 흔든다. 가까울수록 물결이 크다)
   const water = ctx.createLinearGradient(0, y0, 0, yB)
-  water.addColorStop(0, '#0b1222')
-  water.addColorStop(1, '#03060c')
+  water.addColorStop(0, p.water[0])
+  water.addColorStop(1, p.water[1])
   ctx.fillStyle = water
   ctx.fillRect(0, y0, W, riverH)
-
-  // 반사: 한 줄씩 옆으로 흔들어 물결을 만든다. 가까울수록 물결이 크다
+  const storm = RAIN[p.weather] ?? 0
   const row = 2
   for (let r = 0; r < riverH; r += row) {
     const d = r / riverH
-    const amp = 0.4 + d * d * 8
+    const amp = (0.4 + d * d * 8) * (1 + storm * 0.5)
     const dx = Math.sin(r * 0.12 / (0.22 + d) - t * 1.4) * amp + Math.sin(r * 0.027 + t * 0.55) * amp * 0.6
     ctx.globalAlpha = 1 - d * 0.6
-    ctx.drawImage(w.refl, 0, r * dpr, W * dpr, row * dpr, dx, y0 + r, W, row)
+    ctx.drawImage(w.mix.refl, 0, r * dpr, W * dpr, row * dpr, dx, y0 + r, W, row)
   }
-
-  // 흐름: 띠마다 다른 속도로 물결 무늬를 흘려보낸다 (가까울수록 빠르다)
-  ctx.globalAlpha = 1
+  // 흐름: 띠마다 다른 속도로 (가까울수록 빠르다)
+  ctx.globalAlpha = 0.8 + (1 - n) * 0.6
   ctx.globalCompositeOperation = 'lighter'
   const bands = 10
   for (let i = 0; i < bands; i++) {
@@ -267,51 +420,120 @@ function frame(ctx: CanvasRenderingContext2D, w: World, t: number, dt: number) {
       ctx.drawImage(w.current, 0, top * dpr, CURRENT_W * dpr, h * dpr, x, y0 + top, CURRENT_W, h)
   }
   ctx.globalCompositeOperation = 'source-over'
-
-  // 수평선을 부드럽게, 둔치 쪽 물은 어둡게
+  ctx.globalAlpha = 1
   const hz = ctx.createLinearGradient(0, y0, 0, y0 + 8)
-  hz.addColorStop(0, 'rgba(29,35,56,.9)')
-  hz.addColorStop(1, 'rgba(29,35,56,0)')
+  hz.addColorStop(0, p.horizon)
+  hz.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.globalAlpha = 0.6
   ctx.fillStyle = hz
   ctx.fillRect(0, y0, W, 8)
+  ctx.globalAlpha = 1
   const shore = ctx.createLinearGradient(0, yB - riverH * 0.25, 0, yB)
   shore.addColorStop(0, 'rgba(2,4,8,0)')
-  shore.addColorStop(1, 'rgba(2,4,8,.55)')
+  shore.addColorStop(1, `rgba(2,4,8,${0.25 + n * 0.3})`)
   ctx.fillStyle = shore
   ctx.fillRect(0, yB - riverH * 0.25, W, riverH * 0.25)
 
-  ctx.drawImage(w.bank, 0, yB, W, H - yB)
+  // 빗방울이 강물에 떨어져 퍼지는 동그라미
+  if (storm) {
+    const spawn = W * 0.04 * storm * dt * 10
+    for (let i = 0; i < spawn; i++) if (Math.random() < 0.1) {
+      const d = Math.random()
+      w.ripples.push({ x: Math.random() * W, y: y0 + 4 + d * (riverH - 6), age: 0, max: 3 + d * 9 })
+    }
+    ctx.lineWidth = 0.8
+    w.ripples = w.ripples.filter(r => (r.age += dt) < 0.9)
+    for (const r of w.ripples) {
+      const k2 = r.age / 0.9
+      ctx.strokeStyle = `rgba(200,215,235,${0.35 * (1 - k2)})`
+      ctx.beginPath()
+      ctx.ellipse(r.x, r.y, r.max * k2 + 0.5, (r.max * k2 + 0.5) * 0.28, 0, 0, Math.PI * 2)
+      ctx.stroke()
+    }
+  }
 
-  // 화면 밖 가로등이 잔디 위에 떨어뜨린 따뜻한 빛 웅덩이
-  const pool = ctx.createRadialGradient(w.lampX, H * 1.02, 0, w.lampX, H * 1.02, W * 0.34)
-  pool.addColorStop(0, 'rgba(255,190,120,.16)')
-  pool.addColorStop(1, 'rgba(255,190,120,0)')
-  ctx.fillStyle = pool
-  ctx.fillRect(0, yB, W, H - yB)
+  ctx.drawImage(w.mix.bank, 0, yB, W, H - yB)
+
+  // 비·눈
+  if (storm) {
+    const want = Math.round(W * 0.22 * storm)
+    while (w.drops.length < want) w.drops.push({ x: Math.random() * W * 1.2, y: Math.random() * H, v: 700 + Math.random() * 400, len: 10 + Math.random() * 14 })
+    ctx.strokeStyle = n > 0.5 ? 'rgba(170,185,210,.32)' : 'rgba(220,230,245,.38)'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    for (const d of w.drops) {
+      d.y += d.v * dt; d.x -= d.v * dt * 0.12
+      if (d.y > H) { d.y = -d.len; d.x = Math.random() * W * 1.2 }
+      ctx.moveTo(d.x, d.y); ctx.lineTo(d.x + d.len * 0.12, d.y - d.len)
+    }
+    ctx.stroke()
+  } else w.drops.length = 0
+  if (p.weather === 'snow') {
+    const want = Math.round(W * 0.14)
+    while (w.flakes.length < want) w.flakes.push({ x: Math.random() * W, y: Math.random() * H, v: 22 + Math.random() * 40, r: 0.8 + Math.random() * 1.8, ph: Math.random() * 6 })
+    ctx.fillStyle = 'rgba(245,248,255,.85)'
+    for (const f of w.flakes) {
+      f.y += f.v * dt
+      f.x += Math.sin(t * 0.8 + f.ph) * 12 * dt
+      if (f.y > H) { f.y = -4; f.x = Math.random() * W }
+      ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2); ctx.fill()
+    }
+  } else w.flakes.length = 0
+  // 번개: 몇 초에 한 번 하늘이 번쩍인다
+  if (p.weather === 'storm') {
+    w.nextFlash -= dt
+    if (w.nextFlash < 0) { w.flash = 1; w.nextFlash = 5 + Math.random() * 10 }
+    if (w.flash > 0) {
+      ctx.fillStyle = `rgba(215,225,255,${w.flash * 0.35})`
+      ctx.fillRect(0, 0, W, H)
+      w.flash = Math.max(0, w.flash - dt * 3.2)
+    }
+  }
+  // 안개: 수평선 위로 옅은 띠가 흘러간다
+  if (p.weather === 'fog') {
+    const off = (t * 9) % CLOUD_W
+    ctx.globalAlpha = 0.5
+    for (let x = -off; x < W; x += CLOUD_W) ctx.drawImage(n > 0.5 ? w.cloudsNight : w.cloudsDay, x, y0 - riverH * 0.6, CLOUD_W, riverH * 1.1)
+    ctx.globalAlpha = 1
+  }
 }
 
-export function Scene({ settle, children }: { settle: boolean; children?: ReactNode }) {
+// ---------------------------------------------------------------- 컴포넌트
+export function Scene({ pal, sitting, children }: { pal: Palette; sitting: boolean; children?: ReactNode }) {
   const ref = useRef<HTMLCanvasElement>(null)
+  const palRef = useRef(pal)
+  const sittingRef = useRef(sitting)
+  const redraw = useRef<() => void>(() => {})
+  sittingRef.current = sitting
 
   useEffect(() => {
     const canvas = ref.current!
     const ctx = canvas.getContext('2d')!
     const still = matchMedia('(prefers-reduced-motion: reduce)').matches
     let world: World | null = null
-    let raf = 0, last = performance.now(), resizeTimer = 0
+    let raf = 0, last = performance.now(), drawn = 0, resizeTimer = 0
 
     const setup = () => {
       const W = innerWidth, H = innerHeight, dpr = Math.min(devicePixelRatio || 1, 1.75)
       canvas.width = Math.round(W * dpr)
       canvas.height = Math.round(H * dpr)
       world = build(W, H, dpr)
-      frame(ctx, world, last / 1000, 0)
+      compose(world, palRef.current)
+      frame(ctx, world, palRef.current, last / 1000, 0)
+    }
+    redraw.current = () => {
+      if (!world) return
+      compose(world, palRef.current)
+      if (still) frame(ctx, world, palRef.current, last / 1000, 0)
     }
     const loop = (now: number) => {
+      raf = requestAnimationFrame(loop)
+      // 앉아 있는 동안은 초당 30번만 그려 배터리를 아낀다 (느린 화면이라 차이가 안 보인다)
+      if (sittingRef.current && now - drawn < 32) return
       const dt = Math.min(0.1, (now - last) / 1000)
       last = now
-      if (world) frame(ctx, world, now / 1000, dt)
-      raf = requestAnimationFrame(loop)
+      drawn = now
+      if (world) frame(ctx, world, palRef.current, now / 1000, dt)
     }
     const onResize = () => { clearTimeout(resizeTimer); resizeTimer = window.setTimeout(setup, 150) }
 
@@ -321,13 +543,16 @@ export function Scene({ settle, children }: { settle: boolean; children?: ReactN
     return () => { cancelAnimationFrame(raf); clearTimeout(resizeTimer); removeEventListener('resize', onResize) }
   }, [])
 
+  // 하늘 색이 바뀌면 다시 합친다
+  useEffect(() => { palRef.current = pal; redraw.current() }, [pal])
+
   // Motion: 앉아 있는 동안 카메라가 아주 천천히 다가간다
   return (
     <motion.div
       className="scene"
       aria-hidden="true"
-      animate={{ scale: settle ? 1.045 : 1 }}
-      transition={{ duration: settle ? 40 : 1.6, ease: settle ? 'linear' : 'easeOut' }}
+      animate={{ scale: sitting ? 1.045 : 1 }}
+      transition={{ duration: sitting ? 40 : 1.6, ease: sitting ? 'linear' : 'easeOut' }}
     >
       <canvas ref={ref} className="scene-canvas" />
       {children}

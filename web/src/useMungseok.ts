@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { LiveLinePoint } from '@/components/charts/live-line-chart'
+import type { SkyData } from '@/lib/sky'
 
 export type Peer = { id: string; name: string; seat: number }
 export type Rank = { name: string; secs: number }
 export type Phase = 'intro' | 'checking' | 'count' | 'sitting' | 'standing' | 'out' | 'lost' | 'replaced'
-export type Result = { secs: number; rank: number | null }
+export type Result = { secs: number; rank: number | null; best?: number }
 
 const COUNT_KEEP = 120
 // 이 중 하나라도 일어나면 일어난 것으로 친다
@@ -22,6 +23,7 @@ export function useMungseok() {
   const [nameError, setNameError] = useState('')
   const [minRecord, setMinRecord] = useState(10)
   const [sitStart, setSitStart] = useState(0)
+  const [sky, setSky] = useState<SkyData | null>(null)
   const ws = useRef<WebSocket | null>(null)
   const meRef = useRef<string | null>(null)
   const lock = useRef<WakeLockSentinel | null>(null)
@@ -62,6 +64,10 @@ export function useMungseok() {
           setMinRecord(m.minRecord)
           setPeers(new Map(m.peers.map((p: Peer) => [p.id, p])))
           setCounts(m.counts)
+          setSky(m.sky ?? null)
+          break
+        case 'sky':
+          setSky(m.sky)
           break
         case 'name':
           if (m.ok) { setNameError(''); countdownThenSit(m.name) }
@@ -82,7 +88,7 @@ export function useMungseok() {
           setCounts(prev => [...prev.slice(-(COUNT_KEEP - 1)), { time: m.time, value: m.value }])
           break
         case 'out':
-          setResult({ secs: m.secs, rank: m.rank })
+          setResult({ secs: m.secs, rank: m.rank, best: m.best })
           setPhase('out')
           break
       }
@@ -118,5 +124,5 @@ export function useMungseok() {
     }
   }, [phase, send])
 
-  return { peers, me, board, counts, phase, countdown, result, nameError, minRecord, sitStart, sit }
+  return { peers, me, board, counts, phase, countdown, result, nameError, minRecord, sitStart, sit, sky }
 }

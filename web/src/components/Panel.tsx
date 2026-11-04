@@ -68,6 +68,7 @@ export function Panel({ phase, countdown, result, nameError, minRecord, onSit }:
       <p className="result-rank">
         {result.rank ? <>오늘 <strong>{result.rank}등</strong>이에요.</>
           : result.secs < minRecord ? `순위에는 ${minRecord}초 넘게 앉아야 올라가요.`
+          : result.best ? `오늘 내 최고 기록(${korean(result.best)})보다 짧아서 순위는 그대로예요.`
           : '오늘 10등 안에는 못 들었어요.'}
       </p>
       <div className="actions">
