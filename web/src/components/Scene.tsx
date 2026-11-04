@@ -73,6 +73,8 @@ function build(W: number, H: number, dpr: number): World {
     for (let layer = 0; layer < 2; layer++)
       for (let x = nx - hw; x <= nx + hw; x += (2.6 + r3() * 2.2) * tk) {
         const r = (2.4 + r3() * 3.4) * tk
+        // 산 끝자락(높이가 거의 0)에는 놓지 않는다: 다리 아래 수면까지 내려와 수풀처럼 튀어나온다
+        if (deckY - hillY(x) < 6 * tk + layer * 5 * tk) continue
         crowns.push({ x, y: hillY(x) + r * 0.7 + layer * 5 * tk, r, lit: r3() < 0.5 })
       } }
   // 가까운 스카이라인: 가운데에 고층 빌딩, 양옆은 아파트 단지. 왼쪽 하늘은 글자 자리로 낮게 비운다
@@ -188,6 +190,8 @@ function build(W: number, H: number, dpr: number): World {
     for (let x = nx - hw; x <= nx + hw; x += 2) ctx.lineTo(x, hillY(x) + 2 * tk)
     ctx.lineTo(nx + hw, deckY + 1)
     ctx.fill()
+    ctx.save()
+    ctx.beginPath(); ctx.rect(0, 0, W, deckY); ctx.clip() // 숲은 다리 위쪽에만
     for (const c of crowns) {
       ctx.fillStyle = night ? (c.lit ? '#141d2f' : '#101828') : (c.lit ? '#5e8452' : '#4c6e44')
       ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2); ctx.fill()
@@ -196,6 +200,7 @@ function build(W: number, H: number, dpr: number): World {
         ctx.beginPath(); ctx.arc(c.x - c.r * 0.3, c.y - c.r * 0.35, c.r * 0.45, 0, Math.PI * 2); ctx.fill()
       }
     }
+    ctx.restore()
     // 탑 아래 받침 건물 (숲 위로 살짝 보인다)
     const bw = 20 * tk, bh = T * 0.06
     ctx.fillStyle = night ? '#2a3346' : '#e9edf1'
