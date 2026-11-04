@@ -102,13 +102,8 @@ function build(W: number, H: number, dpr: number): World {
       ctx.fillRect(f.x, deckY - f.h, f.w, f.h + (y0 - deckY))
       if (night) for (const [wx, wy] of f.wins) light(wx, wy, 1, 1, '#ffd49a', 0.25)
     }
-    // 남산과 타워
-    ctx.fillStyle = night ? '#10182a' : '#6f817c'
-    ctx.beginPath()
-    ctx.moveTo(nx - W * 0.16, deckY)
-    ctx.bezierCurveTo(nx - W * 0.07, peak - H * 0.01, nx + W * 0.05, peak - H * 0.012, nx + W * 0.15, deckY)
-    ctx.fill()
-    // N서울타워: 위로 가늘어지는 기둥, 여러 층의 원통형 전망대, 가는 윗기둥과 긴 안테나
+    // N서울타워: 위로 가늘어지는 기둥, 여러 층의 원통형 전망대, 가는 윗기둥과 긴 안테나.
+    // 기둥은 땅(deckY)까지 그리고 산을 나중에 덮는다: 탑이 늘 산에서 솟아 보이고 공중에 뜨지 않는다
     const at = (f: number) => peak - th * f       // 산꼭대기에서 높이 비율 f 인 y
     const tk = Math.max(1, k)                     // 탑은 너무 가늘어지지 않게
     const shade = ctx.createLinearGradient(nx - 8 * tk, 0, nx + 8 * tk, 0) // 원통처럼 왼쪽은 밝고 오른쪽은 어둡다
@@ -116,7 +111,7 @@ function build(W: number, H: number, dpr: number): World {
     shade.addColorStop(1, night ? '#0c1220' : '#a9b2be')
     ctx.fillStyle = shade
     const poly = (pts: [number, number][]) => { ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.fill() }
-    poly([[nx - 3 * tk, peak + 2], [nx - 1.5 * tk, at(0.62)], [nx + 1.5 * tk, at(0.62)], [nx + 3 * tk, peak + 2]])      // 기둥
+    poly([[nx - 3.2 * tk, deckY], [nx - 1.5 * tk, at(0.62)], [nx + 1.5 * tk, at(0.62)], [nx + 3.2 * tk, deckY]])        // 기둥 (땅까지)
     poly([[nx - 1.6 * tk, at(0.62)], [nx - 6 * tk, at(0.665)], [nx + 6 * tk, at(0.665)], [nx + 1.6 * tk, at(0.62)]])   // 전망대 아래 받침
     ctx.beginPath(); ctx.roundRect(nx - 6.5 * tk, at(0.745), 13 * tk, at(0.665) - at(0.745), 2 * tk); ctx.fill()       // 전망대
     ctx.fillRect(nx - 4.5 * tk, at(0.79), 9 * tk, at(0.745) - at(0.79))                                                // 전망대 윗층
@@ -131,6 +126,14 @@ function build(W: number, H: number, dpr: number): World {
       ctx.fillRect(nx - th * 0.5, at(0.9), th, th * 0.9)
       for (let i = -5; i <= 5; i++) light(nx + i * 1.1 * tk - 0.35, at(0.715), 0.7, 1.4, '#fff1d6', 0.9, 0.6) // 전망대 창
     }
+    // 남산: 탑을 가운데 둔 좌우 대칭 능선. 꼭대기가 정확히 peak 에 오도록 조절점을 정한다
+    // (양 끝이 deckY, 조절점이 둘 다 c 인 3차 곡선의 가운데 높이 = 0.25·deckY + 0.75·c)
+    const ctrl = (peak - 0.25 * deckY) / 0.75
+    ctx.fillStyle = night ? '#10182a' : '#6f817c'
+    ctx.beginPath()
+    ctx.moveTo(nx - W * 0.16, deckY + 1)
+    ctx.bezierCurveTo(nx - W * 0.06, ctrl, nx + W * 0.06, ctrl, nx + W * 0.16, deckY + 1)
+    ctx.fill()
     // 가까운 빌딩
     const DAY = ['#5a6880', '#66748a', '#4f5d74', '#728098', '#5f6b7d', '#6b6f78']
     for (const b of near) {
