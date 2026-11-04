@@ -3,7 +3,36 @@
  * 해 뜨고 지는 시각을 기준으로 한 하루 열쇠 장면들 사이를 부드럽게 섞는다.
  */
 
+import { useEffect, useState } from 'react'
+
 export type SkyData = { code: number; cloud: number; precip: number; temp: number; sunrise: number; sunset: number }
+
+// 서울 날씨: 화면이 Open-Meteo(키 없는 무료 API)에서 15분마다 직접 받는다. 서버를 깨우지 않아도 된다
+const WEATHER_URL = 'https://api.open-meteo.com/v1/forecast?latitude=37.52&longitude=126.98'
+  + '&current=weather_code,cloud_cover,precipitation,temperature_2m&daily=sunrise,sunset&timezone=Asia%2FSeoul&timeformat=unixtime&forecast_days=1'
+
+export function useSeoulSky() {
+  const [sky, setSky] = useState<SkyData | null>(null)
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      try {
+        const r = await fetch(WEATHER_URL)
+        if (!r.ok) return
+        const j = await r.json()
+        const next: SkyData = {
+          code: j.current?.weather_code, cloud: j.current?.cloud_cover, precip: j.current?.precipitation, temp: j.current?.temperature_2m,
+          sunrise: j.daily?.sunrise?.[0], sunset: j.daily?.sunset?.[0],
+        }
+        if (alive && Object.values(next).every(Number.isFinite)) setSky(next)
+      } catch { /* 못 받으면 시간만으로 하늘을 그린다 */ }
+    }
+    load()
+    const t = setInterval(load, 15 * 60_000)
+    return () => { alive = false; clearInterval(t) }
+  }, [])
+  return sky
+}
 export type Weather = 'clear' | 'clouds' | 'overcast' | 'fog' | 'rain' | 'snow' | 'storm'
 
 export type Palette = {

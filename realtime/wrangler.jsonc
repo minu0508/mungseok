@@ -1,0 +1,21 @@
+{
+  // 멍석 실시간 서버: Cloudflare Workers + Durable Objects (무료 요금제, 한도를 넘으면 과금 대신 차단)
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mungseok-realtime",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "durable_objects": {
+    "bindings": [{ "name": "WORLD", "class_name": "World" }]
+  },
+  // 무료 요금제는 SQLite 저장소를 쓰는 Durable Object 만 쓸 수 있다
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["World"] }],
+  "vars": {
+    "MIN_RECORD_SECS": "10",
+    "CHECK_MIN_MS": "1200000",
+    "CHECK_MAX_MS": "2400000",
+    "CHECK_TIMEOUT_MS": "60000",
+    "ONE_PER_IP": "1",
+    // 화면이 올라간 주소들. 비우면 어느 사이트에서든 접속을 받는다 (배포 뒤 Vercel 주소를 넣는다)
+    "ALLOWED_ORIGINS": ""
+  }
+}

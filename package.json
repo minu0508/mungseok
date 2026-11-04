@@ -1,6 +1,6 @@
 {
   "name": "mungseok",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "한강 둔치에 함께 앉아 아무것도 안 하는 웹 서비스",
   "type": "module",
@@ -8,11 +8,11 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "npm --prefix web ci && npm --prefix web run build",
-    "start": "node server.js",
+    "setup": "npm install && npm --prefix realtime install && npm --prefix web install",
+    "build": "npm --prefix web run build",
     "test": "node --test"
   },
-  "dependencies": {
+  "devDependencies": {
     "ws": "^8.22.1"
   }
 }

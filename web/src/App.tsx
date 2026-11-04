@@ -6,7 +6,7 @@ import { People } from '@/components/People'
 import { Panel } from '@/components/Panel'
 import { Board } from '@/components/Board'
 import { clock } from '@/lib/format'
-import { palette, previewOverride, weatherOf, WEATHER_LABEL, type Palette, type SkyData, type Weather } from '@/lib/sky'
+import { palette, previewOverride, useSeoulSky, weatherOf, WEATHER_LABEL, type Palette, type SkyData, type Weather } from '@/lib/sky'
 import { useRiverSound } from '@/lib/sound'
 import { useMungseok } from '@/useMungseok'
 
@@ -35,7 +35,8 @@ function usePalette(sky: SkyData | null) {
 export default function App() {
   const m = useMungseok()
   const sitting = m.phase === 'sitting' || m.phase === 'standing'
-  const pal = usePalette(m.sky)
+  const sky = useSeoulSky()
+  const pal = usePalette(sky)
   const sound = useRiverSound(pal.weather)
 
   useEffect(() => { document.body.classList.toggle('sitting', sitting) }, [sitting])
@@ -67,7 +68,7 @@ export default function App() {
 
       <motion.div className="hud" animate={{ opacity: sitting ? 0 : 1 }} transition={{ duration: sitting ? 1.2 : 0.5 }}
         style={{ pointerEvents: sitting ? 'none' : undefined }} aria-hidden={sitting}>
-        <Brand pal={pal} temp={m.sky?.temp} sound={sound} />
+        <Brand pal={pal} temp={sky?.temp} sound={sound} />
         <Board board={m.board} counts={m.counts} hidden={sitting} />
         <Panel phase={m.phase} countdown={m.countdown} result={m.result} nameError={m.nameError} minRecord={m.minRecord} onSit={m.sit} />
       </motion.div>

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { LiveLinePoint } from '@/components/charts/live-line-chart'
-import type { SkyData } from '@/lib/sky'
+
+// 실시간 서버(Cloudflare Worker) 주소. 배포할 때 VITE_REALTIME_URL 로 정하고, 없으면 내 PC 의 wrangler dev 로 붙는다
+const REALTIME_URL = import.meta.env.VITE_REALTIME_URL || 'ws://127.0.0.1:8787/ws'
 
 export type Peer = { id: string; name: string; seat: number }
 export type Rank = { name: string; secs: number }
@@ -23,7 +25,6 @@ export function useMungseok() {
   const [nameError, setNameError] = useState('')
   const [minRecord, setMinRecord] = useState(10)
   const [sitStart, setSitStart] = useState(0)
-  const [sky, setSky] = useState<SkyData | null>(null)
   const [asked, setAsked] = useState<number | null>(null) // "아직 계세요?" 응답 마감 시각
   const [paused, setPaused] = useState(false)             // 확인 중에는 움직여도 일어난 걸로 치지 않는다
   const ws = useRef<WebSocket | null>(null)
@@ -52,12 +53,20 @@ export function useMungseok() {
   }, [send])
 
   useEffect(() => {
-    const sock = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`)
+    const sock = new WebSocket(REALTIME_URL)
     ws.current = sock
+    // 연결 유지: 서버는 'ping' 에 잠에서 깨지 않고 'pong' 으로 답한다 (무료 한도를 아낀다)
+    const ping = window.setInterval(() => { if (sock.readyState === WebSocket.OPEN) sock.send('ping') }, 30_000)
+    // 서버는 인원이 바뀔 때만 알려 준다. 그 사이에는 마지막 값을 5초마다 이어 붙여 그래프가 흐르게 한다
+    const tick = window.setInterval(() => setCounts(prev => {
+      const last = prev.at(-1)
+      return last ? [...prev.slice(-(COUNT_KEEP - 1)), { time: Date.now() / 1000, value: last.value }] : prev
+    }), 5_000)
     const put = (p: Peer) => setPeers(prev => new Map(prev).set(p.id, p))
     const drop = (id: string) => setPeers(prev => { const n = new Map(prev); n.delete(id); return n })
 
     sock.onmessage = e => {
+      if (e.data === 'pong') return
       const m = JSON.parse(e.data)
       switch (m.t) {
         case 'welcome':
@@ -65,11 +74,7 @@ export function useMungseok() {
           setMe(m.you)
           setMinRecord(m.minRecord)
           setPeers(new Map(m.peers.map((p: Peer) => [p.id, p])))
-          setCounts(m.counts)
-          setSky(m.sky ?? null)
-          break
-        case 'sky':
-          setSky(m.sky)
+          setCounts(m.counts.length ? m.counts : [{ time: Date.now() / 1000, value: 0 }])
           break
         case 'name':
           if (m.ok) { setNameError(''); countdownThenSit(m.name) }
@@ -103,7 +108,7 @@ export function useMungseok() {
     }
     // 4001: 같은 네트워크에서 새로 접속해 이 연결이 닫혔다
     sock.onclose = e => { clearInterval(timer.current); setPhase(e.code === 4001 ? 'replaced' : 'lost') }
-    return () => { sock.onclose = null; sock.close(); clearInterval(timer.current) }
+    return () => { sock.onclose = null; sock.close(); clearInterval(timer.current); clearInterval(ping); clearInterval(tick) }
   }, [countdownThenSit])
 
   // 이름을 서버에 먼저 확인받고, 통과하면 카운트다운을 시작한다
@@ -145,5 +150,5 @@ export function useMungseok() {
     lock.current = null
   }, [phase])
 
-  return { peers, me, board, counts, phase, countdown, result, nameError, minRecord, sitStart, sit, sky, asked, here }
+  return { peers, me, board, counts, phase, countdown, result, nameError, minRecord, sitStart, sit, asked, here }
 }
