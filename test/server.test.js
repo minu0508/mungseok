@@ -1,7 +1,8 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -11,7 +12,7 @@ let proc;
 const running = new Set();  // 테스트가 중간에 실패해도 띄운 서버를 모두 끈다
 
 function start(port, dataFile) {
-  const p = spawn(process.execPath, ['server.js'], { env: { ...process.env, PORT: port, MIN_RECORD_SECS: '1', DATA_FILE: dataFile } });
+  const p = spawn(process.execPath, ['server.js'], { env: { ...process.env, PORT: port, MIN_RECORD_SECS: '1', DATA_FILE: dataFile, COUNT_EVERY_MS: '200' } });
   running.add(p);
   p.once('exit', () => running.delete(p));
   return new Promise((ok, fail) => {
@@ -46,10 +47,39 @@ function client(port = PORT) {
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-test('serves the page', async () => {
+const built = existsSync(new URL('../web/dist/index.html', import.meta.url));
+
+test('serves the built page and its assets', { skip: !built && 'web/dist 가 없다: npm run build 먼저' }, async () => {
   const res = await fetch(`http://localhost:${PORT}/`);
   assert.equal(res.status, 200);
-  assert.match(await res.text(), /멍석/);
+  const html = await res.text();
+  assert.match(html, /멍석/);
+  const js = html.match(/src="(\/assets\/[^"]+\.js)"/)?.[1];
+  assert.ok(js, 'page references a bundled script');
+  const asset = await fetch(`http://localhost:${PORT}${js}`);
+  assert.equal(asset.status, 200);
+  assert.match(asset.headers.get('content-type'), /javascript/);
+  assert.match(asset.headers.get('cache-control'), /immutable/);
+});
+
+test('cannot read files outside web/dist', async () => {
+  // fetch 는 ../ 를 미리 정리해 버리므로 날것의 경로로 보낸다
+  for (const path of ['/%2e%2e/package.json', '/..%2fserver.js', '/%2e%2e%2f%2e%2e%2fserver.js']) {
+    const status = await new Promise((ok, fail) =>
+      http.get({ host: 'localhost', port: PORT, path }, r => { r.resume(); ok(r.statusCode); }).on('error', fail));
+    assert.equal(status, 404, path);
+  }
+});
+
+test('broadcasts how many people are sitting', async () => {
+  const a = client();
+  await a.open;
+  await a.next(m => m.t === 'welcome');
+  a.send({ t: 'sit', name: '세는중' });
+  await a.next(m => m.t === 'sit');
+  const c = await a.next(m => m.t === 'count' && m.value >= 1);
+  assert.ok(c.time > 1e9 && c.time < 1e11, 'time is unix seconds');
+  a.ws.close();
 });
 
 test('sit, see each other, stand up, get ranked', async () => {

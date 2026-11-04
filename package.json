@@ -8,6 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "build": "npm --prefix web ci && npm --prefix web run build",
     "start": "node server.js",
     "test": "node --test"
   },

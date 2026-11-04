@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer } from 'ws';
@@ -12,16 +12,40 @@ const MIN_RECORD = Number(process.env.MIN_RECORD_SECS) || 10; // 이보다 짧�
 const BOARD_SIZE = 10;
 const DATA_FILE = process.env.DATA_FILE || fileURLToPath(new URL('./data/board.json', import.meta.url));
 
-const html = await readFile(new URL('./public/index.html', import.meta.url));
+const COUNT_EVERY_MS = Number(process.env.COUNT_EVERY_MS) || 5000; // 앉은 사람 수를 방송하는 간격
+const COUNT_KEEP = 120;                                              // 새로 들어온 사람에게 줄 기록 개수
+
+// --- 화면: web/dist (npm run build 로 만든다) ---
+const DIST = fileURLToPath(new URL('./web/dist', import.meta.url));
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.json': 'application/json', '.ico': 'image/x-icon' };
+
+async function serveStatic(path, res) {
+  let rel;
+  try { rel = decodeURIComponent(path); } catch { return res.writeHead(400).end(); }
+  const file = join(DIST, rel === '/' ? 'index.html' : rel);
+  if (!file.startsWith(DIST + sep)) return res.writeHead(404).end(); // ../ 로 dist 밖을 읽지 못하게
+  try {
+    const body = await readFile(file);
+    const hashed = rel.startsWith('/assets/');
+    res.writeHead(200, {
+      'content-type': TYPES[extname(file)] || 'application/octet-stream',
+      'cache-control': hashed ? 'public, max-age=31536000, immutable' : 'no-cache',
+    });
+    res.end(body);
+  } catch (e) {
+    if (rel === '/' && e.code === 'ENOENT') {
+      res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' });
+      return res.end('화면이 아직 빌드되지 않았어요. npm run build 를 먼저 실행하세요.');
+    }
+    res.writeHead(404).end();
+  }
+}
 
 const server = http.createServer((req, res) => {
   const path = req.url.split('?')[0];
-  if (path === '/') {
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
-    return res.end(html);
-  }
   if (path === '/health') return res.end('ok');
-  res.writeHead(404).end();
+  if (req.method !== 'GET' && req.method !== 'HEAD') return res.writeHead(405).end();
+  serveStatic(path, res);
 });
 
 // --- 오늘의 순위 (한국 시간 자정에 초기화) ---
@@ -100,7 +124,7 @@ wss.on('connection', ws => {
   ws.on('pong', () => { ws.alive = true; });
 
   const sitting = [...peer.room.values()].filter(p => p.since).map(view);
-  send(ws, { t: 'welcome', you: peer.id, seat: peer.seat, peers: sitting, minRecord: MIN_RECORD });
+  send(ws, { t: 'welcome', you: peer.id, seat: peer.seat, peers: sitting, minRecord: MIN_RECORD, counts });
   send(ws, boardMsg());
 
   ws.on('message', raw => {
@@ -140,6 +164,17 @@ const heartbeat = setInterval(() => {
     ws.ping();
   }
 }, 30_000);
-wss.on('close', () => clearInterval(heartbeat));
+
+// 전체 둔치에 앉은 사람 수: 화면의 실시간 차트가 그린다 (time 은 초 단위)
+const counts = [];
+const countTimer = setInterval(() => {
+  let value = 0;
+  for (const room of rooms) for (const p of room.values()) if (p.since) value++;
+  const point = { time: Date.now() / 1000, value };
+  counts.push(point);
+  if (counts.length > COUNT_KEEP) counts.shift();
+  for (const c of wss.clients) send(c, { t: 'count', ...point });
+}, COUNT_EVERY_MS);
+wss.on('close', () => { clearInterval(heartbeat); clearInterval(countTimer); });
 
 server.listen(PORT, () => console.log(`mungseok listening on ${server.address().port}`));

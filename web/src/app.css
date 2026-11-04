@@ -1,0 +1,162 @@
+/* 멍석 고유 디자인. shadcn 토큰(--muted 등)과 겹치지 않게 --mg- 접두사를 쓴다 */
+:root {
+  --mg-night: #19223a;
+  --mg-dusk: #3a4766;
+  --mg-water: #141d31;
+  --mg-bank: #1f2a24;
+  --mg-lamp: #f2c14e;
+  --mg-straw: #c9a66b;
+  --mg-straw-dark: #a88447;
+  --mg-ink: #ece5d3;
+  --mg-muted: #8c94a8;
+  --mg-panel: rgba(15, 22, 38, .92);
+  --mg-display: 'Hahmlet', serif;
+  --mg-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  /* shadcn·Bklit 토큰을 한강 밤 색으로 덮는다 */
+  --background: var(--mg-night);
+  --foreground: var(--mg-ink);
+  --ring: var(--mg-lamp);
+  --chart-line-primary: var(--mg-straw);
+  --chart-label: var(--mg-muted);
+  --chart-grid: rgba(236, 229, 211, .08);
+}
+
+html, body, #root { height: 100%; }
+body {
+  background: var(--mg-night);
+  color: var(--mg-ink);
+  font-size: 15px;
+  line-height: 1.6;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+:focus-visible { outline: 2px solid var(--mg-lamp); outline-offset: 3px; }
+
+/* ---------- 장면 ---------- */
+.scene { position: fixed; inset: 0; }
+.sky { position: absolute; inset: 0 0 52% 0; background: linear-gradient(var(--mg-night), var(--mg-dusk)); }
+.skyline { position: absolute; left: 0; right: 0; bottom: 52%; width: 100%; height: 16vh; display: block; }
+.bridge { position: absolute; left: 0; right: 0; bottom: calc(52% - 2.2vh); width: 100%; height: 4.4vh; display: block; }
+.river { position: absolute; inset: 48% 0 34% 0; background: var(--mg-water); overflow: hidden; }
+.glint {
+  position: absolute; top: 4%; width: 3px; height: 70%; opacity: .4;
+  background: linear-gradient(rgba(242, 193, 78, .55), rgba(242, 193, 78, 0));
+  filter: blur(1px);
+}
+.bank { position: absolute; inset: 66% 0 0 0; background: var(--mg-bank); }
+.bank::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 6px; background: #2d3a33; }
+
+/* ---------- 사람과 멍석 (뒷모습) ---------- */
+.people { position: fixed; inset: 66% 0 0 0; pointer-events: none; }
+.person {
+  position: absolute;
+  width: calc(clamp(30px, 5.6vw, 64px) * var(--s));
+  aspect-ratio: 1 / 1.15;
+}
+.mat {
+  position: absolute; left: -35%; right: -35%; bottom: 0; height: 26%;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 3px, rgba(0, 0, 0, .16) 3px 4px),
+    repeating-linear-gradient(0deg, var(--mg-straw) 0 2px, var(--mg-straw-dark) 2px 3px);
+  transform: perspective(60px) rotateX(38deg);
+  border-radius: 2px;
+}
+.body {
+  position: absolute; left: 8%; right: 8%; bottom: 10%; height: 58%;
+  background: var(--jacket);
+  border-radius: 46% 46% 12% 12% / 60% 60% 10% 10%;
+  animation: breathe 5.5s ease-in-out infinite;
+  animation-delay: var(--d);
+}
+.head {
+  position: absolute; left: 50%; bottom: 58%; width: 44%; aspect-ratio: 1;
+  translate: -50% 0;
+  background: #15151a; border-radius: 50%;
+  animation: breathe-head 5.5s ease-in-out infinite;
+  animation-delay: var(--d);
+}
+@keyframes breathe { 50% { translate: 0 -1.5%; } }
+@keyframes breathe-head { 50% { translate: -50% -1.5%; } }
+.tag {
+  position: absolute; left: 50%; bottom: -34%; translate: -50% 0;
+  font-size: 11px; color: var(--mg-muted); white-space: nowrap;
+  max-width: 9em; overflow: hidden; text-overflow: ellipsis;
+}
+.person.me .tag { color: var(--mg-lamp); }
+
+/* ---------- 패널 (비어 있는 하늘에 띄운다) ---------- */
+.panel {
+  position: fixed; top: clamp(16px, 9vh, 96px); left: clamp(16px, 6vw, 88px); z-index: 20;
+  width: min(420px, calc(100% - 32px));
+  padding: 22px 22px 20px;
+  background: var(--mg-panel);
+  border: 1px solid rgba(236, 229, 211, .08);
+  border-radius: 6px;
+}
+.wordmark { font: 600 34px/1 var(--mg-display); letter-spacing: -.01em; }
+.wordmark span { color: var(--mg-straw); }
+.lead { margin-top: 10px; }
+.rule { margin-top: 6px; color: var(--mg-muted); font-size: 13px; }
+.sit-form { display: flex; gap: 8px; margin-top: 18px; }
+.sit-form input {
+  flex: 1; min-width: 0; padding: 0 12px; height: 40px;
+  background: rgba(0, 0, 0, .25); border: 1px solid rgba(236, 229, 211, .16); border-radius: 4px;
+}
+.sit-form input::placeholder { color: var(--mg-muted); }
+.btn-straw { background: var(--mg-straw); color: #1b1608; border-radius: 4px; }
+.btn-straw:hover { background: #d6b57d; }
+.btn-ghost { background: transparent; color: var(--mg-ink); border-color: rgba(236, 229, 211, .2); border-radius: 4px; }
+.row { display: flex; gap: 8px; margin-top: 18px; }
+.count-num { font: 600 56px/1 var(--mg-display); color: var(--mg-lamp); margin-top: 6px; transform-origin: left center; }
+.result-time { font: 600 30px/1.2 var(--mg-display); margin-top: 6px; }
+.result-rank { margin-top: 4px; color: var(--mg-muted); }
+.result-rank strong { color: var(--mg-lamp); font-weight: 500; }
+.here { margin-top: 14px; font-size: 12px; color: var(--mg-muted); }
+
+/* ---------- 순위 + 실시간 인원 ---------- */
+.board {
+  position: fixed; top: 16px; right: 16px; width: 240px; z-index: 20;
+  padding: 14px 16px; background: var(--mg-panel); border-radius: 6px;
+  font-size: 13px; transition: opacity .6s;
+}
+.board.gone { opacity: 0; pointer-events: none; }
+.board-toggle, .board h2 { display: block; font-size: 12px; font-weight: 500; color: var(--mg-muted); margin-bottom: 8px; text-align: left; cursor: default; }
+.board h2 { margin: 12px 0 2px; padding-top: 10px; border-top: 1px solid rgba(236, 229, 211, .08); }
+.board h2 .now { color: var(--mg-straw); font-family: var(--mg-mono); margin-left: 4px; }
+.board ol { list-style: none; padding: 0; margin: 0; }
+.board li { display: flex; gap: 8px; padding: 3px 0; }
+.board .r { width: 1.4em; color: var(--mg-muted); font-family: var(--mg-mono); }
+.board .n { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board .s { font-family: var(--mg-mono); color: var(--mg-straw); }
+.board .empty { color: var(--mg-muted); }
+.board .live { height: 84px; margin: 0 -6px; }
+
+/* ---------- 앉아 있는 동안: 화면이 나를 내버려 둔다 ---------- */
+.clock {
+  position: fixed; left: 50%; top: 18vh; translate: -50% 0; z-index: 20;
+  font: 400 15px var(--mg-mono); color: var(--mg-ink); opacity: .5;
+  pointer-events: none; animation: fade-in 2s ease-out;
+}
+@keyframes fade-in { from { opacity: 0; } }
+body.sitting { cursor: none; }
+
+.hud { display: contents; }
+
+@media (max-width: 640px) {
+  /* 좁은 화면: 순위와 패널을 한 줄로 쌓아 높이가 바뀌어도 겹치지 않게 */
+  .hud { display: flex; flex-direction: column; gap: 12px; position: fixed; top: 16px; left: 16px; right: 16px; z-index: 20; pointer-events: none; }
+  .hud > * { pointer-events: auto; }
+  .board, .panel { position: static; width: auto; }
+  .board.gone { display: none; }
+  .board-toggle { cursor: pointer; }
+  .board li:not(:first-child), .board .live { display: none; }  /* 좁은 화면: 1등만, 누르면 펼친다 */
+  .board.open li:not(:first-child) { display: flex; }
+  .board.open .live { display: block; }
+  .board h2 { margin-top: 8px; padding-top: 6px; }
+  .person:not(.me) .tag { display: none; }  /* 이름표가 겹친다: 내 것만 */
+}
+@media (prefers-reduced-motion: reduce) {
+  .body, .head, .clock { animation: none !important; }
+  .board { transition: none; }
+}
