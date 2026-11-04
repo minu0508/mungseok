@@ -11,8 +11,9 @@ const tmp = mkdtempSync(join(tmpdir(), 'mungseok-'));  // 테스트 기록이 �
 let proc;
 const running = new Set();  // 테스트가 중간에 실패해도 띄운 서버를 모두 끈다
 
-function start(port, dataFile) {
-  const p = spawn(process.execPath, ['server.js'], { env: { ...process.env, PORT: port, MIN_RECORD_SECS: '1', DATA_FILE: dataFile, COUNT_EVERY_MS: '200' } });
+// 한 PC 에서 여러 사람을 흉내 내므로 기본은 IP 제한을 끈다. 제한 자체는 따로 시험한다
+function start(port, dataFile, env = {}) {
+  const p = spawn(process.execPath, ['server.js'], { env: { ...process.env, PORT: port, MIN_RECORD_SECS: '1', DATA_FILE: dataFile, COUNT_EVERY_MS: '200', ONE_PER_IP: '0', ...env } });
   running.add(p);
   p.once('exit', () => running.delete(p));
   return new Promise((ok, fail) => {
@@ -153,6 +154,38 @@ test('the board survives a restart, and a corrupt file starts empty', async () =
   assert.deepEqual((await c.next(m => m.t === 'board')).list, []);
   c.ws.close();
   await stop(p);
+});
+
+test('one connection per IP: a new one replaces the old one', async () => {
+  const port = PORT + 2;
+  const p = await start(port, join(tmp, 'ip.json'), { ONE_PER_IP: '1' });
+  const a = client(port);
+  await a.open;
+  await a.next(m => m.t === 'welcome');
+  const closed = new Promise(r => a.ws.addEventListener('close', e => r(e.code)));
+  const b = client(port);
+  await b.open;
+  await b.next(m => m.t === 'welcome');
+  assert.equal(await closed, 4001, 'old connection closed as replaced');
+  assert.equal(b.ws.readyState, WebSocket.OPEN, 'new connection stays');
+  b.ws.close();
+  await stop(p);
+});
+
+test('blocked names are refused before and at sitting', async () => {
+  const c = client();
+  await c.open;
+  await c.next(m => m.t === 'welcome');
+  c.send({ t: 'name', name: '시1발' });
+  assert.deepEqual(await c.next(m => m.t === 'name'), { t: 'name', ok: false });
+  await sleep(350);
+  c.send({ t: 'name', name: '  한강러  ' });
+  assert.deepEqual(await c.next(m => m.t === 'name'), { t: 'name', ok: true, name: '한강러' });
+  await sleep(350);
+  c.send({ t: 'sit', name: '카톡 abc' }); // 미리 확인을 건너뛰고 바로 앉으려 해도 막힌다
+  assert.equal((await c.next(m => m.t === 'name')).ok, false);
+  await assert.rejects(c.next(m => m.t === 'sit', 600), /timeout/);
+  c.ws.close();
 });
 
 test('leaving while seated tells the room', async () => {

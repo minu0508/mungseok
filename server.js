@@ -5,6 +5,7 @@ import { dirname, join, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer } from 'ws';
+import { isBlockedName } from './filter.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 const ROOM_MAX = 30;                                        // 한 둔치(방)에 앉을 수 있는 사람 수
@@ -14,6 +15,15 @@ const DATA_FILE = process.env.DATA_FILE || fileURLToPath(new URL('./data/board.j
 
 const COUNT_EVERY_MS = Number(process.env.COUNT_EVERY_MS) || 5000; // 앉은 사람 수를 방송하는 간격
 const COUNT_KEEP = 120;                                              // 새로 들어온 사람에게 줄 기록 개수
+const ONE_PER_IP = process.env.ONE_PER_IP !== '0';                   // IP 하나당 접속 하나
+const TRUST_PROXY = process.env.TRUST_PROXY === '1';                 // 프록시 뒤에 둘 때만 X-Forwarded-For 를 믿는다
+
+function clientIp(req) {
+  // 프록시가 붙인 마지막 값만 믿는다: 앞쪽 값은 접속자가 마음대로 써 넣을 수 있다
+  const ip = TRUST_PROXY ? (req.headers['x-forwarded-for'] || '').split(',').pop().trim() || req.socket.remoteAddress
+    : req.socket.remoteAddress;
+  return (ip || '').replace(/^::ffff:/, '');
+}
 
 // --- 화면: web/dist (npm run build 로 만든다) ---
 const DIST = fileURLToPath(new URL('./web/dist', import.meta.url));
@@ -117,8 +127,15 @@ function standUp(peer) {
 }
 
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 1024 });
+const byIp = new Map();
 
-wss.on('connection', ws => {
+wss.on('connection', (ws, req) => {
+  const ip = clientIp(req);
+  if (ONE_PER_IP) {
+    // 같은 IP 의 이전 접속은 닫는다. 새로고침이나 죽은 탭 때문에 본인이 못 들어오는 일이 없게, 거절이 아니라 교체한다
+    byIp.get(ip)?.close(4001, 'replaced');
+    byIp.set(ip, ws);
+  }
   const peer = joinRoom(ws);
   ws.alive = true;
   ws.on('pong', () => { ws.alive = true; });
@@ -135,8 +152,14 @@ wss.on('connection', ws => {
     try { msg = JSON.parse(raw); } catch { return; }
     if (!msg || typeof msg !== 'object') return;
 
-    if (msg.t === 'sit' && !peer.since) {
-      peer.name = cleanName(msg.name);
+    if (msg.t === 'name') {
+      // 앉기 전에 이름을 미리 확인한다 (카운트다운이 끝난 뒤에 거절당하지 않게)
+      const name = cleanName(msg.name);
+      send(ws, isBlockedName(name) ? { t: 'name', ok: false } : { t: 'name', ok: true, name });
+    } else if (msg.t === 'sit' && !peer.since) {
+      const name = cleanName(msg.name);
+      if (isBlockedName(name)) return send(ws, { t: 'name', ok: false }); // 미리 확인을 건너뛴 접속도 막는다
+      peer.name = name;
       peer.since = now;
       toRoom(peer.room, { t: 'sit', peer: view(peer) });
     } else if (msg.t === 'up' && peer.since) {
@@ -148,6 +171,7 @@ wss.on('connection', ws => {
   });
 
   ws.on('close', () => {
+    if (byIp.get(ip) === ws) byIp.delete(ip);
     // 연결이 끊긴 것은 기록하지 않는다: 일어났는지 네트워크가 끊겼는지 구분할 수 없다
     if (peer.since) standUp(peer);
     peer.room.delete(ws);

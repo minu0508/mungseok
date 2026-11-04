@@ -3,12 +3,13 @@ import type { LiveLinePoint } from '@/components/charts/live-line-chart'
 
 export type Peer = { id: string; name: string; seat: number }
 export type Rank = { name: string; secs: number }
-export type Phase = 'intro' | 'count' | 'sitting' | 'standing' | 'out' | 'lost'
+export type Phase = 'intro' | 'checking' | 'count' | 'sitting' | 'standing' | 'out' | 'lost' | 'replaced'
 export type Result = { secs: number; rank: number | null }
 
 const COUNT_KEEP = 120
 // 이 중 하나라도 일어나면 일어난 것으로 친다
 const TRIP_EVENTS = ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart', 'blur'] as const
+export const NAME_REJECTED = '쓸 수 없는 말이 들어 있어요. 다른 이름으로 앉아 주세요.'
 
 export function useMungseok() {
   const [peers, setPeers] = useState<Map<string, Peer>>(() => new Map())
@@ -18,15 +19,33 @@ export function useMungseok() {
   const [phase, setPhase] = useState<Phase>('intro')
   const [countdown, setCountdown] = useState(3)
   const [result, setResult] = useState<Result | null>(null)
+  const [nameError, setNameError] = useState('')
   const [minRecord, setMinRecord] = useState(10)
   const [sitStart, setSitStart] = useState(0)
   const ws = useRef<WebSocket | null>(null)
   const meRef = useRef<string | null>(null)
   const lock = useRef<WakeLockSentinel | null>(null)
+  const timer = useRef(0)
 
   const send = useCallback((m: object) => {
     if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify(m))
   }, [])
+
+  // 3, 2, 1 이 끝나면 앉는다. 버튼을 누른 손이 바로 실격되지 않게 하는 여유 시간
+  const countdownThenSit = useCallback((name: string) => {
+    setPhase('count')
+    setCountdown(3)
+    navigator.wakeLock?.request('screen').then(l => { lock.current = l }).catch(() => {})
+    let n = 3
+    clearInterval(timer.current)
+    timer.current = window.setInterval(() => {
+      n -= 1
+      if (n > 0) return setCountdown(n)
+      clearInterval(timer.current)
+      ;(document.activeElement as HTMLElement | null)?.blur()
+      send({ t: 'sit', name })
+    }, 1000)
+  }, [send])
 
   useEffect(() => {
     const sock = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`)
@@ -43,6 +62,10 @@ export function useMungseok() {
           setMinRecord(m.minRecord)
           setPeers(new Map(m.peers.map((p: Peer) => [p.id, p])))
           setCounts(m.counts)
+          break
+        case 'name':
+          if (m.ok) { setNameError(''); countdownThenSit(m.name) }
+          else { clearInterval(timer.current); setNameError(NAME_REJECTED); setPhase('intro') }
           break
         case 'sit':
           put(m.peer)
@@ -64,23 +87,16 @@ export function useMungseok() {
           break
       }
     }
-    sock.onclose = () => setPhase('lost')
-    return () => { sock.onclose = null; sock.close() }
-  }, [])
+    // 4001: 같은 네트워크에서 새로 접속해 이 연결이 닫혔다
+    sock.onclose = e => { clearInterval(timer.current); setPhase(e.code === 4001 ? 'replaced' : 'lost') }
+    return () => { sock.onclose = null; sock.close(); clearInterval(timer.current) }
+  }, [countdownThenSit])
 
-  // 3, 2, 1 이 끝나면 앉는다. 버튼을 누른 손이 바로 실격되지 않게 하는 여유 시간
+  // 이름을 서버에 먼저 확인받고, 통과하면 카운트다운을 시작한다
   const sit = useCallback((name: string) => {
-    setPhase('count')
-    setCountdown(3)
-    navigator.wakeLock?.request('screen').then(l => { lock.current = l }).catch(() => {})
-    let n = 3
-    const t = setInterval(() => {
-      n -= 1
-      if (n > 0) return setCountdown(n)
-      clearInterval(t)
-      ;(document.activeElement as HTMLElement | null)?.blur()
-      send({ t: 'sit', name })
-    }, 1000)
+    setNameError('')
+    setPhase('checking')
+    send({ t: 'name', name })
   }, [send])
 
   // 앉아 있는 동안에만 입력을 감시한다
@@ -102,5 +118,5 @@ export function useMungseok() {
     }
   }, [phase, send])
 
-  return { peers, me, board, counts, phase, countdown, result, minRecord, sitStart, sit }
+  return { peers, me, board, counts, phase, countdown, result, nameError, minRecord, sitStart, sit }
 }
