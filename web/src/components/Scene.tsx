@@ -58,11 +58,26 @@ function build(W: number, H: number, dpr: number): World {
     far.push({ x, w, h, wins })
     x += w + rnd() * 3
   }
-  // 남산
-  const nx = W * (narrow ? 0.74 : 0.7), peak = deckY - H * 0.085, th = H * 0.1
+  // 남산: 숲으로 덮인 둥근 산, 꼭대기에 N서울타워, 왼쪽 비탈에 철골 송신탑
+  const nx = W * (narrow ? 0.74 : 0.7), peak = deckY - H * 0.085
+  const T = H * 0.135                        // 산꼭대기에서 안테나 끝까지
+  const hw = W * (narrow ? 0.2 : 0.16)       // 산의 반폭
+  // 능선 높이 함수: 탑과 송신탑을 정확히 능선 위에 세우려고 곡선 대신 식으로 둔다
+  const hillY = (x: number) => { const u = Math.min(1, Math.abs(x - nx) / hw); return deckY - (deckY - peak) * Math.cos(u * Math.PI / 2) ** 1.6 }
+  const lx2 = nx - hw * 0.34                 // 송신탑 자리
+  const latticeTop = hillY(lx2) - T * 0.5
+  const tk = Math.max(1, k)                  // 탑은 너무 가늘어지지 않게
+  // 나무 덩어리: 낮·밤 그림이 같도록 한 번만 정한다
+  const crowns: { x: number; y: number; r: number; lit: boolean }[] = []
+  { const r3 = seeded(55)
+    for (let layer = 0; layer < 2; layer++)
+      for (let x = nx - hw; x <= nx + hw; x += (2.6 + r3() * 2.2) * tk) {
+        const r = (2.4 + r3() * 3.4) * tk
+        crowns.push({ x, y: hillY(x) + r * 0.7 + layer * 5 * tk, r, lit: r3() < 0.5 })
+      } }
   // 가까운 스카이라인: 가운데에 고층 빌딩, 양옆은 아파트 단지. 왼쪽 하늘은 글자 자리로 낮게 비운다
   const near: Bld[] = []
-  const blinks: Blink[] = [{ x: nx, y: peak - th - H * 0.03, phase: 0 }]
+  const blinks: Blink[] = [{ x: nx, y: peak - T, phase: 0 }, { x: lx2, y: latticeTop, phase: 2.4 }]
   for (let x = -6; x < W;) {
     const pos = x / W
     const core = narrow ? pos > 0.15 && pos < 0.55 : pos > 0.36 && pos < 0.62
@@ -102,38 +117,92 @@ function build(W: number, H: number, dpr: number): World {
       ctx.fillRect(f.x, deckY - f.h, f.w, f.h + (y0 - deckY))
       if (night) for (const [wx, wy] of f.wins) light(wx, wy, 1, 1, '#ffd49a', 0.25)
     }
-    // N서울타워: 위로 가늘어지는 기둥, 여러 층의 원통형 전망대, 가는 윗기둥과 긴 안테나.
-    // 기둥은 땅(deckY)까지 그리고 산을 나중에 덮는다: 탑이 늘 산에서 솟아 보이고 공중에 뜨지 않는다
-    const at = (f: number) => peak - th * f       // 산꼭대기에서 높이 비율 f 인 y
-    const tk = Math.max(1, k)                     // 탑은 너무 가늘어지지 않게
-    const shade = ctx.createLinearGradient(nx - 8 * tk, 0, nx + 8 * tk, 0) // 원통처럼 왼쪽은 밝고 오른쪽은 어둡다
-    shade.addColorStop(0, night ? '#1d2639' : '#eef1f4')
-    shade.addColorStop(1, night ? '#0c1220' : '#a9b2be')
-    ctx.fillStyle = shade
+    // ---- 남산 (사진처럼: 숲 덮인 산, 철골 송신탑, 받침 건물 위 N서울타워) ----
+    // 탑들은 땅(deckY)까지 그리고 산을 나중에 덮는다: 늘 산에서 솟아 보이고 공중에 뜨지 않는다
+    const at = (f: number) => peak - T * f        // 산꼭대기에서 높이 비율 f 인 y
     const poly = (pts: [number, number][]) => { ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.fill() }
-    poly([[nx - 3.2 * tk, deckY], [nx - 1.5 * tk, at(0.62)], [nx + 1.5 * tk, at(0.62)], [nx + 3.2 * tk, deckY]])        // 기둥 (땅까지)
-    poly([[nx - 1.6 * tk, at(0.62)], [nx - 6 * tk, at(0.665)], [nx + 6 * tk, at(0.665)], [nx + 1.6 * tk, at(0.62)]])   // 전망대 아래 받침
-    ctx.beginPath(); ctx.roundRect(nx - 6.5 * tk, at(0.745), 13 * tk, at(0.665) - at(0.745), 2 * tk); ctx.fill()       // 전망대
-    ctx.fillRect(nx - 4.5 * tk, at(0.79), 9 * tk, at(0.745) - at(0.79))                                                // 전망대 윗층
-    poly([[nx - 1.6 * tk, at(0.79)], [nx - 1 * tk, at(1)], [nx + 1 * tk, at(1)], [nx + 1.6 * tk, at(0.79)]])           // 윗기둥
-    ctx.fillRect(nx - 0.5, at(1) - H * 0.03, 1, H * 0.03)                                                               // 안테나
-    ctx.fillRect(nx - 1.5 * tk, at(1) - H * 0.012, 3 * tk, 0.8)
-    if (night) {
-      const g = ctx.createRadialGradient(nx, at(0.4), 0, nx, at(0.4), th * 0.5) // 기둥을 비추는 조명
-      g.addColorStop(0, 'rgba(255,214,170,.16)')
-      g.addColorStop(1, 'rgba(255,214,170,0)')
-      ctx.fillStyle = g
-      ctx.fillRect(nx - th * 0.5, at(0.9), th, th * 0.9)
-      for (let i = -5; i <= 5; i++) light(nx + i * 1.1 * tk - 0.35, at(0.715), 0.7, 1.4, '#fff1d6', 0.9, 0.6) // 전망대 창
+    const RED = night ? '#5c2a2c' : '#d0473a', WHITE = night ? '#3a4458' : '#f1f2f4'
+
+    // 철골 송신탑: 빨강·흰색 마디가 번갈아 칠해진 삼각 철골
+    {
+      const base = hillY(lx2) + 4 * tk, top = latticeTop, segs = 8
+      ctx.lineWidth = 0.8
+      for (let i = 0; i < segs; i++) {
+        const y1 = base - ((base - top) * i) / segs, y2 = base - ((base - top) * (i + 1)) / segs
+        const w1 = 3.4 * tk * (1 - (i / segs) * 0.8), w2 = 3.4 * tk * (1 - ((i + 1) / segs) * 0.8)
+        ctx.strokeStyle = i % 2 ? WHITE : RED
+        ctx.beginPath()
+        ctx.moveTo(lx2 - w1, y1); ctx.lineTo(lx2 - w2, y2)        // 왼쪽 다리
+        ctx.moveTo(lx2 + w1, y1); ctx.lineTo(lx2 + w2, y2)        // 오른쪽 다리
+        ctx.moveTo(lx2 - w1, y1); ctx.lineTo(lx2 + w2, y2)        // 엇갈린 버팀대
+        ctx.moveTo(lx2 + w1, y1); ctx.lineTo(lx2 - w2, y2)
+        ctx.stroke()
+      }
+      ctx.fillStyle = RED
+      ctx.fillRect(lx2 - 0.5, top - 4 * tk, 1, 4 * tk)
     }
-    // 남산: 탑을 가운데 둔 좌우 대칭 능선. 꼭대기가 정확히 peak 에 오도록 조절점을 정한다
-    // (양 끝이 deckY, 조절점이 둘 다 c 인 3차 곡선의 가운데 높이 = 0.25·deckY + 0.75·c)
-    const ctrl = (peak - 0.25 * deckY) / 0.75
-    ctx.fillStyle = night ? '#10182a' : '#6f817c'
+
+    // N서울타워
+    const shade = ctx.createLinearGradient(nx - 8 * tk, 0, nx + 8 * tk, 0) // 원통처럼 왼쪽은 밝고 오른쪽은 어둡다
+    shade.addColorStop(0, night ? '#5a6681' : '#f3f5f7')
+    shade.addColorStop(1, night ? '#273046' : '#b4bcc7')
+    ctx.fillStyle = shade
+    poly([[nx - 1.9 * tk, deckY], [nx - 1.5 * tk, at(0.47)], [nx + 1.5 * tk, at(0.47)], [nx + 1.9 * tk, deckY]])        // 기둥 (땅까지)
+    ctx.fillRect(nx - 2.3 * tk, at(0.3), 4.6 * tk, 1.2)                                                                  // 기둥 마디
+    ctx.fillRect(nx - 2.1 * tk, at(0.16), 4.2 * tk, 1.2)
+    poly([[nx - 1.6 * tk, at(0.47)], [nx - 5.6 * tk, at(0.495)], [nx + 5.6 * tk, at(0.495)], [nx + 1.6 * tk, at(0.47)]]) // 전망대 받침
+    ctx.beginPath(); ctx.roundRect(nx - 6 * tk, at(0.555), 12 * tk, at(0.495) - at(0.555), 1.5 * tk); ctx.fill()         // 아래 전망대
+    ctx.beginPath(); ctx.roundRect(nx - 4.8 * tk, at(0.6), 9.6 * tk, at(0.555) - at(0.6), 1.2 * tk); ctx.fill()          // 위 전망대
+    ctx.fillRect(nx - 3 * tk, at(0.62), 6 * tk, at(0.6) - at(0.62))                                                       // 지붕
+    // 전망대 유리창 띠
+    ctx.fillStyle = night ? '#1b2131' : '#6d7d90'
+    ctx.fillRect(nx - 6 * tk, at(0.535), 12 * tk, (at(0.515) - at(0.535)))
+    ctx.fillRect(nx - 4.8 * tk, at(0.585), 9.6 * tk, (at(0.57) - at(0.585)))
+    ctx.fillStyle = shade
+    poly([[nx - 1.3 * tk, at(0.62)], [nx - 1.1 * tk, at(0.69)], [nx + 1.1 * tk, at(0.69)], [nx + 1.3 * tk, at(0.62)]])  // 흰 목
+    // 안테나: 빨강·흰색 띠, 중간에 작은 고리 둘
+    const bands = 7
+    for (let i = 0; i < bands; i++) {
+      const y1 = at(0.69 + (0.31 * i) / bands), y2 = at(0.69 + (0.31 * (i + 1)) / bands)
+      const wd = (1.6 - (i / bands) * 0.9) * tk
+      ctx.fillStyle = i % 2 ? WHITE : RED
+      ctx.fillRect(nx - wd / 2, y2, wd, y1 - y2)
+    }
+    ctx.fillStyle = RED
+    ctx.fillRect(nx - 1.7 * tk, at(0.75), 3.4 * tk, 1.3)
+    ctx.fillRect(nx - 1.3 * tk, at(0.85), 2.6 * tk, 1.1)
+    if (night) {
+      const g = ctx.createRadialGradient(nx, at(0.35), 0, nx, at(0.35), T * 0.45) // 탑을 비추는 조명
+      g.addColorStop(0, 'rgba(200,215,255,.14)')
+      g.addColorStop(1, 'rgba(200,215,255,0)')
+      ctx.fillStyle = g
+      ctx.fillRect(nx - T * 0.45, at(0.8), T * 0.9, T * 0.8)
+      for (let i = -5; i <= 5; i++) light(nx + i * 1.05 * tk - 0.35, at(0.53), 0.7, 1.3, '#fff1d6', 0.95, 0.6) // 전망대 창 불빛
+      for (let i = -4; i <= 4; i++) light(nx + i * 1.0 * tk - 0.35, at(0.58), 0.7, 1, '#ffe6c4', 0.8, 0.4)
+    }
+
+    // 산: 매끈한 언덕 위에 나무 덩어리를 겹쳐 숲처럼
+    ctx.fillStyle = night ? '#0f1726' : '#47663f'
     ctx.beginPath()
-    ctx.moveTo(nx - W * 0.16, deckY + 1)
-    ctx.bezierCurveTo(nx - W * 0.06, ctrl, nx + W * 0.06, ctrl, nx + W * 0.16, deckY + 1)
+    ctx.moveTo(nx - hw, deckY + 1)
+    for (let x = nx - hw; x <= nx + hw; x += 2) ctx.lineTo(x, hillY(x) + 2 * tk)
+    ctx.lineTo(nx + hw, deckY + 1)
     ctx.fill()
+    for (const c of crowns) {
+      ctx.fillStyle = night ? (c.lit ? '#141d2f' : '#101828') : (c.lit ? '#5e8452' : '#4c6e44')
+      ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2); ctx.fill()
+      if (!night && c.lit) { // 해 드는 쪽 잎
+        ctx.fillStyle = 'rgba(170,205,140,.35)'
+        ctx.beginPath(); ctx.arc(c.x - c.r * 0.3, c.y - c.r * 0.35, c.r * 0.45, 0, Math.PI * 2); ctx.fill()
+      }
+    }
+    // 탑 아래 받침 건물 (숲 위로 살짝 보인다)
+    const bw = 20 * tk, bh = T * 0.06
+    ctx.fillStyle = night ? '#2a3346' : '#e9edf1'
+    ctx.fillRect(nx - bw / 2, peak - bh + 2 * tk, bw, bh)
+    ctx.fillStyle = night ? '#1a2132' : '#7d8ea2'
+    ctx.fillRect(nx - bw / 2, peak - bh * 0.55 + 2 * tk, bw, 1.4)
+    if (night) for (let i = 0; i < 8; i++) light(nx - bw / 2 + 1.5 + i * (bw - 3) / 7, peak - bh * 0.55 + 2 * tk, 1, 1.4, '#ffd49a', 0.85, 0.5)
     // 가까운 빌딩
     const DAY = ['#5a6880', '#66748a', '#4f5d74', '#728098', '#5f6b7d', '#6b6f78']
     for (const b of near) {
