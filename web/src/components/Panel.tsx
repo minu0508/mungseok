@@ -63,9 +63,10 @@ export function Panel({ phase, countdown, result, nameError, minRecord, onSit }:
   )
   else if (phase === 'out' && result) body = (
     <div>
-      <p className="eyebrow">일어났어요</p>
+      <p className="eyebrow">{result.away ? '자리를 비우셨네요' : '일어났어요'}</p>
       <CountUp secs={result.secs} />
       <p className="result-rank">
+        {result.away && <>자리를 비운 것 같아서 마지막으로 확인된 때까지만 기록했어요.<br /></>}
         {result.rank ? <>오늘 <strong>{result.rank}등</strong>이에요.</>
           : result.secs < minRecord ? `순위에는 ${minRecord}초 넘게 앉아야 올라가요.`
           : result.best ? `오늘 내 최고 기록(${korean(result.best)})보다 짧아서 순위는 그대로예요.`

@@ -5,7 +5,7 @@ import type { SkyData } from '@/lib/sky'
 export type Peer = { id: string; name: string; seat: number }
 export type Rank = { name: string; secs: number }
 export type Phase = 'intro' | 'checking' | 'count' | 'sitting' | 'standing' | 'out' | 'lost' | 'replaced'
-export type Result = { secs: number; rank: number | null; best?: number }
+export type Result = { secs: number; rank: number | null; best?: number; away?: boolean }
 
 const COUNT_KEEP = 120
 // 이 중 하나라도 일어나면 일어난 것으로 친다
@@ -24,6 +24,8 @@ export function useMungseok() {
   const [minRecord, setMinRecord] = useState(10)
   const [sitStart, setSitStart] = useState(0)
   const [sky, setSky] = useState<SkyData | null>(null)
+  const [asked, setAsked] = useState<number | null>(null) // "아직 계세요?" 응답 마감 시각
+  const [paused, setPaused] = useState(false)             // 확인 중에는 움직여도 일어난 걸로 치지 않는다
   const ws = useRef<WebSocket | null>(null)
   const meRef = useRef<string | null>(null)
   const lock = useRef<WakeLockSentinel | null>(null)
@@ -87,8 +89,14 @@ export function useMungseok() {
         case 'count':
           setCounts(prev => [...prev.slice(-(COUNT_KEEP - 1)), { time: m.time, value: m.value }])
           break
+        case 'check':
+          setPaused(true)
+          setAsked(Date.now() + m.timeout)
+          break
         case 'out':
-          setResult({ secs: m.secs, rank: m.rank, best: m.best })
+          setAsked(null)
+          setPaused(false)
+          setResult({ secs: m.secs, rank: m.rank, best: m.best, away: m.away })
           setPhase('out')
           break
       }
@@ -105,9 +113,17 @@ export function useMungseok() {
     send({ t: 'name', name })
   }, [send])
 
-  // 앉아 있는 동안에만 입력을 감시한다
+  // "네, 있어요": 답하고 나서 손을 거둘 2초를 준 뒤 다시 감시한다
+  const here = useCallback(() => {
+    send({ t: 'here' })
+    setAsked(null)
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    window.setTimeout(() => setPaused(false), 2000)
+  }, [send])
+
+  // 앉아 있는 동안에만 입력을 감시한다 (확인 창이 떠 있을 때는 쉰다)
   useEffect(() => {
-    if (phase !== 'sitting') return
+    if (phase !== 'sitting' || paused) return
     const trip = (e: Event) => {
       if (e instanceof MouseEvent && e.type === 'mousemove' && !e.movementX && !e.movementY) return // 화면이 바뀔 때 생기는 가짜 움직임
       if (e.type === 'visibilitychange' && !document.hidden) return
@@ -119,10 +135,15 @@ export function useMungseok() {
     return () => {
       TRIP_EVENTS.forEach(ev => window.removeEventListener(ev, trip))
       document.removeEventListener('visibilitychange', trip)
-      lock.current?.release().catch(() => {})
-      lock.current = null
     }
-  }, [phase, send])
+  }, [phase, paused, send])
 
-  return { peers, me, board, counts, phase, countdown, result, nameError, minRecord, sitStart, sit, sky }
+  // 앉은 상태가 끝나면 화면 꺼짐 방지를 푼다
+  useEffect(() => {
+    if (phase === 'count' || phase === 'sitting' || phase === 'standing') return
+    lock.current?.release().catch(() => {})
+    lock.current = null
+  }, [phase])
+
+  return { peers, me, board, counts, phase, countdown, result, nameError, minRecord, sitStart, sit, sky, asked, here }
 }

@@ -236,6 +236,37 @@ test('pages carry security headers and an absolute share-image origin', { skip: 
   assert.match(html, new RegExp(`http://localhost:${PORT}/og\\.png`));
 });
 
+test('presence check: answering keeps you seated, ignoring it stands you up at the last confirmation', async () => {
+  const port = PORT + 4;
+  const p = await start(port, join(tmp, 'away.json'), { CHECK_MIN_MS: '300', CHECK_MAX_MS: '400', CHECK_TIMEOUT_MS: '500' });
+  const c = client(port);
+  await c.open;
+  await c.next(m => m.t === 'welcome');
+
+  // 답하는 사람
+  c.send({ t: 'sit', name: '있어요' });
+  await c.next(m => m.t === 'sit');
+  await c.next(m => m.t === 'check');
+  c.send({ t: 'here' });
+  await c.next(m => m.t === 'check'); // 다음 확인이 다시 온다 = 아직 앉아 있다
+  c.send({ t: 'here' });
+  await sleep(300);
+  c.send({ t: 'up' });
+  const stayed = await c.next(m => m.t === 'out');
+  assert.equal(stayed.away, undefined);
+
+  // 답하지 않는 사람
+  await sleep(400);
+  c.send({ t: 'sit', name: '없어요' });
+  await c.next(m => m.t === 'sit');
+  await c.next(m => m.t === 'check');
+  const away = await c.next(m => m.t === 'out', 6000);
+  assert.equal(away.away, true);
+  assert.equal(away.secs, 0, 'only the time up to the last confirmation (sitting down) counts');
+  c.ws.close();
+  await stop(p);
+});
+
 test('leaving while seated tells the room', async () => {
   const a = client(), b = client();
   await Promise.all([a.open, b.open]);

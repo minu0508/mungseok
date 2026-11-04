@@ -48,6 +48,8 @@ body {
   font-size: 15px;
   line-height: 1.6;
   letter-spacing: -0.01em;
+  word-break: keep-all;       /* 한국어는 낱말 단위로 줄을 바꾼다 */
+  overflow-wrap: anywhere;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   font-feature-settings: 'tnum' 0;
@@ -176,6 +178,23 @@ body {
 .clock-num { font-size: 44px; font-weight: 200; letter-spacing: .01em; color: var(--mg-ink); opacity: .8; line-height: 1; }
 .clock-label { margin-top: 12px; font-size: 12px; letter-spacing: .12em; color: var(--mg-ink-3); }
 body.sitting { cursor: none; }
+body.sitting.asking { cursor: auto; }
+
+.check {
+  position: fixed; left: 50%; top: calc(20vh + 96px); translate: -50% 0; z-index: 30;
+  width: min(360px, calc(100vw - 32px)); padding: 20px 22px 18px; text-align: center;
+  border-radius: 18px; background: var(--mg-card); border: 1px solid var(--mg-line);
+  backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+.check-title { font-size: 20px; font-weight: 700; letter-spacing: -0.03em; }
+.check-desc { margin-top: 6px; font-size: 13px; color: var(--mg-ink-2); }
+.check-btn {
+  display: inline-flex; align-items: center; gap: 10px; margin-top: 16px; height: 44px; padding: 0 20px;
+  border: 0; border-radius: 999px; background: var(--mg-straw); color: #1a1307; font-size: 15px; font-weight: 600; cursor: pointer;
+}
+html.day .check-btn { color: #fff; }
+.check-btn:hover { background: var(--mg-straw-hi); }
+.check-left { font-size: 12px; font-weight: 500; opacity: .7; font-variant-numeric: tabular-nums; }
 
 /* ---------- 공유 미리보기 이미지 (?og=1) ---------- */
 .og-title { position: fixed; left: 64px; top: 70px; z-index: 20; }

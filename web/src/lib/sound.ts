@@ -86,6 +86,24 @@ export function useRiverSound(weather: Weather) {
     graph.rain.gain.setTargetAtTime(amount, graph.ctx.currentTime, 1.5)
   }, [weather, on])
 
+  // 작은 종소리: "아직 계세요?"를 물을 때. 물소리를 켠 사람에게만 울린다
+  const chime = useCallback(() => {
+    const graph = g.current
+    if (!graph || !on) return
+    const { ctx } = graph, t = ctx.currentTime
+    for (const [freq, delay] of [[784, 0], [1175, 0.18]] as const) {
+      const osc = ctx.createOscillator(), env = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = freq
+      env.gain.setValueAtTime(0, t + delay)
+      env.gain.linearRampToValueAtTime(0.12, t + delay + 0.02)
+      env.gain.exponentialRampToValueAtTime(0.0001, t + delay + 1.6)
+      osc.connect(env).connect(ctx.destination)
+      osc.start(t + delay)
+      osc.stop(t + delay + 1.7)
+    }
+  }, [on])
+
   useEffect(() => () => { g.current?.ctx.close() }, [])
-  return { on, toggle }
+  return { on, toggle, chime }
 }

@@ -18,6 +18,11 @@ const COUNT_KEEP = 120;                                              // 새로 �
 const ONE_PER_IP = process.env.ONE_PER_IP !== '0';                   // IP 하나당 접속 하나
 const TRUST_PROXY = process.env.TRUST_PROXY === '1';                 // 프록시 뒤에 둘 때만 X-Forwarded-For 를 믿는다
 const WEATHER = process.env.WEATHER !== '0';                         // 서울 날씨를 받아 하늘에 반영한다
+// 자리 비움 확인: 앉아 있는 동안 무작위로 "아직 계세요?"를 묻고, 답이 없으면 마지막 확인 때까지만 기록한다
+const CHECK_MIN_MS = Number(process.env.CHECK_MIN_MS) || 20 * 60_000;
+const CHECK_MAX_MS = Number(process.env.CHECK_MAX_MS) || 40 * 60_000;
+const CHECK_TIMEOUT_MS = Number(process.env.CHECK_TIMEOUT_MS) || 60_000;
+const CHECK_GRACE_MS = 3_000; // 네트워크가 느린 사람의 답도 받아 준다
 const WEATHER_URL = 'https://api.open-meteo.com/v1/forecast?latitude=37.52&longitude=126.98'
   + '&current=weather_code,cloud_cover,precipitation,temperature_2m&daily=sunrise,sunset&timezone=Asia%2FSeoul&timeformat=unixtime&forecast_days=1';
 
@@ -184,11 +189,30 @@ function allow(peer, now) {
   return true;
 }
 
-function standUp(peer) {
-  const secs = Math.floor((Date.now() - peer.since) / 1000);
+function standUp(peer, until = Date.now()) {
+  const secs = Math.floor((until - peer.since) / 1000);
   peer.since = null;
+  clearTimeout(peer.checkTimer);
+  peer.asked = null;
   toRoom(peer.room, { t: 'up', id: peer.id, secs });
   return secs;
+}
+
+// 다음 확인을 예약한다. 묻고 나서 답이 없으면 자리를 비운 것으로 보고 일으켜 세운다
+function scheduleCheck(ws, peer) {
+  clearTimeout(peer.checkTimer);
+  peer.checkTimer = setTimeout(() => {
+    if (!peer.since) return;
+    peer.asked = Date.now();
+    send(ws, { t: 'check', timeout: CHECK_TIMEOUT_MS });
+    peer.checkTimer = setTimeout(() => {
+      if (!peer.since || !peer.asked) return;
+      const secs = standUp(peer, peer.confirmed); // 마지막으로 있다고 확인된 때까지만 인정한다
+      const { rank, best } = record(peer.name, secs, peer.who);
+      send(ws, { t: 'out', secs, rank, best, away: true });
+      if (rank) broadcast(boardMsg());
+    }, CHECK_TIMEOUT_MS + CHECK_GRACE_MS);
+  }, CHECK_MIN_MS + Math.random() * (CHECK_MAX_MS - CHECK_MIN_MS));
 }
 
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 1024 });
@@ -202,6 +226,7 @@ wss.on('connection', (ws, req) => {
     byIp.set(ip, ws);
   }
   const peer = joinRoom(ws);
+  peer.who = who(ip);
   ws.alive = true;
   ws.on('pong', () => { ws.alive = true; });
 
@@ -227,10 +252,16 @@ wss.on('connection', (ws, req) => {
       if (isBlockedName(name)) return send(ws, { t: 'name', ok: false }); // 미리 확인을 건너뛴 접속도 막는다
       peer.name = name;
       peer.since = now;
+      peer.confirmed = now;
       toRoom(peer.room, { t: 'sit', peer: view(peer) });
+      scheduleCheck(ws, peer);
+    } else if (msg.t === 'here' && peer.since && peer.asked) {
+      peer.asked = null;
+      peer.confirmed = now;
+      scheduleCheck(ws, peer);
     } else if (msg.t === 'up' && peer.since) {
       const secs = standUp(peer);
-      const { rank, best } = record(peer.name, secs, who(ip));
+      const { rank, best } = record(peer.name, secs, peer.who);
       send(ws, { t: 'out', secs, rank, best });
       if (rank) broadcast(boardMsg());
     }

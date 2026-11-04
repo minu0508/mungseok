@@ -74,6 +74,7 @@ export default function App() {
 
       <AnimatePresence>
         {m.phase === 'sitting' && <Clock key="clock" start={m.sitStart} />}
+        {m.phase === 'sitting' && m.asked && <CheckPrompt key="check" deadline={m.asked} onHere={m.here} chime={sound.chime} />}
       </AnimatePresence>
       <p className="sr-only" aria-live="polite">{m.phase === 'sitting' ? '앉았어요. 이제 아무것도 하지 마세요.' : ''}</p>
     </>
@@ -96,6 +97,26 @@ function Brand({ pal, temp, sound }: { pal: Palette; temp?: number; sound: { on:
         물소리 {sound.on ? '끄기' : '켜기'}
       </button>
     </header>
+  )
+}
+
+// 자리 비움 확인: 하늘에 조용히 떠서 "아직 계세요?"를 묻는다
+function CheckPrompt({ deadline, onHere, chime }: { deadline: number; onHere: () => void; chime: () => void }) {
+  const [left, setLeft] = useState(() => Math.max(0, Math.ceil((deadline - Date.now()) / 1000)))
+  useEffect(() => {
+    chime()
+    document.body.classList.add('asking')
+    const t = setInterval(() => setLeft(Math.max(0, Math.ceil((deadline - Date.now()) / 1000))), 500)
+    return () => { clearInterval(t); document.body.classList.remove('asking') }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deadline])
+  return (
+    <motion.div className="check" role="alertdialog" aria-labelledby="check-title" aria-describedby="check-desc"
+      initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}>
+      <p id="check-title" className="check-title">아직 계세요?</p>
+      <p id="check-desc" className="check-desc">멍때리는 중인지 한 번 확인해요. 눌러도 일어난 걸로 치지 않아요.</p>
+      <button type="button" className="check-btn" onClick={onHere} autoFocus>네, 여기 있어요 <span className="check-left">{left}초</span></button>
+    </motion.div>
   )
 }
 
