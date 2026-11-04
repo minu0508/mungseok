@@ -1,0 +1,17 @@
+{
+  "name": "mungseok",
+  "version": "0.1.0",
+  "private": true,
+  "description": "한강 둔치에 함께 앉아 아무것도 안 하는 웹 서비스",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "ws": "^8.22.1"
+  }
+}
