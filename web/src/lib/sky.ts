@@ -146,6 +146,20 @@ export function palette(now: number, data: SkyData | null, weather: Weather): Pa
   }
 }
 
+/** Weather updates blend into the current light instead of switching abruptly. */
+export function interpolatePalette(a: Palette, b: Palette, t: number): Palette {
+  const lerp = (x: number, y: number) => x + (y - x) * t
+  return {
+    ...b,
+    top: mix(a.top, b.top, t), mid: mix(a.mid, b.mid, t), horizon: mix(a.horizon, b.horizon, t),
+    glow: mixRgba(a.glow, b.glow, t),
+    water: [mix(a.water[0], b.water[0], t), mix(a.water[1], b.water[1], t)],
+    bank: [mix(a.bank[0], b.bank[0], t), mix(a.bank[1], b.bank[1], t)],
+    night: lerp(a.night, b.night), stars: lerp(a.stars, b.stars), cloud: lerp(a.cloud, b.cloud),
+    sun: a.sun && b.sun ? { x: lerp(a.sun.x, b.sun.x), alt: lerp(a.sun.alt, b.sun.alt) } : b.sun,
+  }
+}
+
 /** 미리보기: ?time=07:10&weather=rain 으로 시간과 날씨를 정할 수 있다 */
 export function previewOverride() {
   const q = new URLSearchParams(location.search)

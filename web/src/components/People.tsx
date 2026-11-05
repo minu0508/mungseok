@@ -36,26 +36,26 @@ function Figure({ h }: { h: number }) {
   return (
     <svg viewBox="0 0 100 100" className="figure">
       <defs>
-        <pattern id={`${id}w`} width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(0)">
-          <rect width="4" height="4" fill="#b8935a" />
-          <rect width="4" height="1.2" fill="#d2ad70" />
-          <rect x="0" width="0.7" height="4" fill="rgba(60,40,15,.35)" />
-        </pattern>
+        <radialGradient id={`${id}shadow`}>
+          <stop offset="0" stopColor="#020706" stopOpacity=".65" />
+          <stop offset=".65" stopColor="#020706" stopOpacity=".3" />
+          <stop offset="1" stopColor="#020706" stopOpacity="0" />
+        </radialGradient>
         <linearGradient id={`${id}j`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor={jacket} />
           <stop offset="1" stopColor="#0b0d12" />
         </linearGradient>
         <linearGradient id={`${id}rim`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="rgba(255,206,150,.55)" />
+          <stop offset="0" stopColor="rgba(255,224,177,.35)" />
           <stop offset=".45" stopColor="rgba(255,206,150,0)" />
         </linearGradient>
       </defs>
 
       {/* 그림자와 멍석 */}
-      <ellipse cx="50" cy="95" rx="46" ry="4" fill="rgba(0,0,0,.55)" />
-      <path d="M6 94 L94 94 L84 76 L16 76 Z" fill={`url(#${id}w)`} />
-      <path d="M6 94 L94 94 L84 76 L16 76 Z" fill="none" stroke="rgba(40,28,10,.6)" strokeWidth="1" />
-      <path d="M16 76 L84 76" stroke="rgba(255,225,170,.35)" strokeWidth=".8" />
+      <ellipse cx="51" cy="94" rx="49" ry="7" fill={`url(#${id}shadow)`} />
+      <path d="M7 94 L93 94 L83 77 L17 77Z" fill="#8b754b" />
+      <image href="/scenery/woven-mat.webp" x="5" y="75.5" width="90" height="20.5" preserveAspectRatio="none" />
+      <ellipse cx="50" cy="85" rx="33" ry="7" fill={`url(#${id}shadow)`} />
 
       <g className="breath">
         {/* 책상다리: 골반 양옆으로 무릎이 보인다 */}
