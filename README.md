@@ -2,6 +2,8 @@
 
 **한강 둔치에 멍석 깔아뒀어요. 앉아서 아무것도 하지 마세요.**
 
+👉 **[mungseok.vercel.app](https://mungseok.vercel.app)** 에서 바로 앉을 수 있어요.
+
 멍석은 브라우저에서 바로 들어가는 온라인 한강 둔치예요. 이름을 적고 멍석에 앉으면, 지금 접속한 다른 사람들과 나란히 앉아 강을 바라보게 돼요. 마우스도, 키보드도, 화면도 건드리지 않고 오래 버티면 이겨요.
 
 ![밤의 한강 둔치에 사람들이 멍석을 깔고 나란히 앉아 있는 멍석 첫 화면](docs/screenshots/night.jpg)
@@ -35,6 +37,6 @@
 
 ## 만든 재료
 
-React · Vite · Tailwind CSS · shadcn/ui · [Motion](https://motion.dev) · [Anime.js](https://animejs.com) · [Bklit UI](https://bklit.com) · Canvas 2D · Web Audio · Cloudflare Workers / Durable Objects · [Open-Meteo](https://open-meteo.com) (날씨) · [Pretendard](https://github.com/orioncactus/pretendard) (글꼴)
+React · Vite · Tailwind CSS · shadcn/ui · [Motion](https://motion.dev) · [Anime.js](https://animejs.com) · [Bklit UI](https://bklit.com) · Canvas 2D · Web Audio · Vercel · Cloudflare Workers / Durable Objects · [Open-Meteo](https://open-meteo.com) (날씨) · [Pretendard](https://github.com/orioncactus/pretendard) (글꼴)
 
 <sub>스크린샷의 순위와 인원 그래프는 소개를 위한 예시예요.</sub>
