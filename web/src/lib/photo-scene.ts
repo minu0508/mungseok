@@ -86,12 +86,15 @@ export function composePhoto(w: PhotoWorld, p: Palette, images: Scenery) {
     sx.fillRect(rnd() * W, rnd() * y0 * .66, .5 + rnd() * .6, .7)
   }
   const sun = p.sun, veil = 1 - p.cloud
-  if (sun && p.night < .85 && p.cloud < .8) {
-    const x = (1 - sun.x) * W, y = y0 - (.06 + sun.alt * .62) * y0
+  // 북쪽을 보는 구도라 한낮의 해는 등 뒤에 있다. 해 뜰 무렵(오른쪽)·질 무렵(왼쪽) 지평선 근처에서만 보이고,
+  // 높이 오르기 전에 사라져 문구·순위 패널과 겹치지 않는다
+  const seen = sun ? Math.max(0, Math.min(1, (.32 - sun.alt) / .1)) * veil : 0
+  if (sun && seen > 0 && p.night < .85 && p.cloud < .8) {
+    const x = (1 - sun.x) * W, y = y0 - (.03 + sun.alt * .6) * y0
     const bloom = sx.createRadialGradient(x, y, 2, x, y, 110)
-    bloom.addColorStop(0, `rgba(255,227,175,${veil * .55})`); bloom.addColorStop(1, 'rgba(255,211,146,0)')
+    bloom.addColorStop(0, `rgba(255,227,175,${seen * .55})`); bloom.addColorStop(1, 'rgba(255,211,146,0)')
     sx.fillStyle = bloom; sx.fillRect(x - 110, y - 110, 220, 220)
-    sx.globalAlpha = veil; sx.fillStyle = sun.alt < .15 ? '#ffd1a0' : '#fff6e1'
+    sx.globalAlpha = seen; sx.fillStyle = sun.alt < .15 ? '#ffd1a0' : '#fff6e1'
     sx.beginPath(); sx.arc(x, y, 7, 0, Math.PI * 2); sx.fill(); sx.globalAlpha = 1
   }
   if (p.night > .5 && p.cloud < .7) {
