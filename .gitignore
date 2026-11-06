@@ -6,3 +6,9 @@ node_modules/
 *.log
 
 .private/
+
+# graphify 지도 — 이 PC 에서만 쓴다
+graphify-out/
+.claude/
+CLAUDE.md
+.gitattributes
